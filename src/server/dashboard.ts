@@ -91,7 +91,7 @@ export function buildDashboardPayload(opts: {
       })
     : { agent: "unknown", currentTool: null, lastUpdated: null, sessionLabel: "(no session)", status: "unknown" as const }
 
-  const tasks = sessionId ? deriveBackgroundTasks({ storage: opts.storage, mainSessionId: sessionId }) : []
+  const tasks = sessionId ? deriveBackgroundTasks({ storage: opts.storage, mainSessionId: sessionId, nowMs }) : []
 
   const payload: DashboardPayload = {
     mainSession: {

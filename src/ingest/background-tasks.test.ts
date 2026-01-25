@@ -104,13 +104,19 @@ describe("deriveBackgroundTasks", () => {
       "utf8"
     )
 
-    const rows = deriveBackgroundTasks({ storage, mainSessionId })
+    const rows = deriveBackgroundTasks({ storage, mainSessionId, nowMs: 3000 })
     expect(rows.length).toBe(1)
     expect(rows[0].description).toBe("Scan repo")
     expect(rows[0].agent).toBe("explore")
     expect(rows[0].sessionId).toBe("ses_child")
     expect(rows[0].toolCalls).toBe(1)
     expect(rows[0].lastTool).toBe("grep")
+    expect(rows[0].timeline).toBe("1970-01-01T00:00:01Z: 2s")
+
+    const completed = deriveBackgroundTasks({ storage, mainSessionId, nowMs: 20_000 })
+    expect(completed.length).toBe(1)
+    expect(completed[0].status).toBe("completed")
+    expect(completed[0].timeline).toBe("1970-01-01T00:00:01Z: 1s")
 
     // Ensure no sensitive keys leak
     expect((rows[0] as unknown as Record<string, unknown>).prompt).toBeUndefined()

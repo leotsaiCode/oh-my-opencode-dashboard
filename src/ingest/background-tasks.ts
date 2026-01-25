@@ -180,17 +180,39 @@ function deriveBackgroundSessionStats(storage: OpenCodeStorageRoots, sessionId: 
   return { toolCalls, lastTool, lastUpdateAt }
 }
 
-function formatTimeline(startAt: number | null, lastUpdateAt: number | null): string {
-  if (!startAt && !lastUpdateAt) return ""
-  const start = typeof startAt === "number" ? new Date(startAt).toISOString() : "?"
-  const last = typeof lastUpdateAt === "number" ? new Date(lastUpdateAt).toISOString() : "?"
-  return `${start} - ${last}`
+function formatIsoNoMs(ts: number): string {
+  const iso = new Date(ts).toISOString()
+  return iso.replace(/\.\d{3}Z$/, "Z")
+}
+
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
+  const seconds = totalSeconds % 60
+  const totalMinutes = Math.floor(totalSeconds / 60)
+  const minutes = totalMinutes % 60
+  const totalHours = Math.floor(totalMinutes / 60)
+  const hours = totalHours % 24
+  const days = Math.floor(totalHours / 24)
+
+  if (days > 0) return hours > 0 ? `${days}d${hours}h` : `${days}d`
+  if (totalHours > 0) return minutes > 0 ? `${totalHours}h${minutes}m` : `${totalHours}h`
+  if (totalMinutes > 0) return seconds > 0 ? `${totalMinutes}m${seconds}s` : `${totalMinutes}m`
+  return `${seconds}s`
+}
+
+function formatTimeline(startAt: number | null, endAtMs: number): string {
+  if (typeof startAt !== "number") return ""
+  const start = formatIsoNoMs(startAt)
+  const elapsed = formatElapsed(endAtMs - startAt)
+  return `${start}: ${elapsed}`
 }
 
 export function deriveBackgroundTasks(opts: {
   storage: OpenCodeStorageRoots
   mainSessionId: string
+  nowMs?: number
 }): BackgroundTaskRow[] {
+  const nowMs = opts.nowMs ?? Date.now()
   const messageDir = getMessageDir(opts.storage.message, opts.mainSessionId)
   const metas = readRecentMessageMetas(messageDir, 200)
   const allSessionMetas = readAllSessionMetas(opts.storage.session)
@@ -268,11 +290,13 @@ export function deriveBackgroundTasks(opts: {
       let status: BackgroundTaskRow["status"] = "unknown"
       if (!backgroundSessionId) {
         status = "queued"
-      } else if (stats.lastUpdateAt && Date.now() - stats.lastUpdateAt <= 15_000) {
+      } else if (stats.lastUpdateAt && nowMs - stats.lastUpdateAt <= 15_000) {
         status = "running"
       } else if (stats.toolCalls > 0) {
         status = "completed"
       }
+
+      const timelineEndMs = status === "completed" ? (stats.lastUpdateAt ?? nowMs) : nowMs
 
       rows.push({
         id: part.callID,
@@ -281,7 +305,7 @@ export function deriveBackgroundTasks(opts: {
         status,
         toolCalls: backgroundSessionId ? stats.toolCalls : null,
         lastTool: stats.lastTool,
-        timeline: formatTimeline(startedAt, stats.lastUpdateAt),
+        timeline: formatTimeline(startedAt, timelineEndMs),
         sessionId: backgroundSessionId,
       })
     }

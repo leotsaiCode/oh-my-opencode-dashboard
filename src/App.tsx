@@ -56,7 +56,7 @@ const FALLBACK_DATA: DashboardPayload = {
       status: "running",
       toolCalls: 3,
       lastTool: "grep",
-      timeline: "Q 2m ago - S 1m ago",
+      timeline: "2026-01-01T00:00:00Z: 2m",
     },
   ],
   raw: {
