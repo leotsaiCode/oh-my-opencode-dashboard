@@ -1,0 +1,11 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Sisyphus workspace
+.sisyphus/
+
+# Lockfile (commented out for now)
+# bun.lock

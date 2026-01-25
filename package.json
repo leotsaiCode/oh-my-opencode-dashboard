@@ -1,0 +1,31 @@
+{
+  "name": "oh-my-opencode-dashboard",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/cli/dev.ts",
+    "dev:api": "bun run src/server/dev.ts",
+    "dev:ui": "vite",
+    "build": "bun run build:ui && bun run build:api",
+    "build:ui": "vite build",
+    "build:api": "bun run src/server/build.ts",
+    "start": "bun run src/server/start.ts",
+    "test": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.4.12",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.72",
+    "@types/react-dom": "^18.2.24",
+    "@vitejs/plugin-react": "^4.3.1",
+    "bun-types": "^1.1.20",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2",
+    "vitest": "^1.6.0"
+  }
+}
