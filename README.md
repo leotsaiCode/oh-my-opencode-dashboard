@@ -2,6 +2,8 @@
 
 Local-only, read-only dashboard for viewing OhMyOpenCode agent progress.
 
+![Dashboard GUI](./gui.png)
+
 ## Goals
 
 - Show plan progress from `.sisyphus/boulder.json` + the active plan markdown.
