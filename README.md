@@ -12,7 +12,32 @@ Local-only, read-only dashboard for viewing OhMyOpenCode agent progress.
 
 - Bun
 
-## Install
+## Install (npm)
+
+Run without installing globally:
+
+```bash
+bunx -p @oh-my-opencode-dashboard/dashboard oh-my-opencode-dashboard -- --project /absolute/path/to/your/project
+```
+
+Or install globally:
+
+```bash
+bun add -g @oh-my-opencode-dashboard/dashboard
+```
+
+Then:
+
+```bash
+oh-my-opencode-dashboard --project /absolute/path/to/your/project
+```
+
+Options:
+
+- `--project <path>` (required): project root that contains `.sisyphus/`
+- `--port <number>` (optional): default 51234
+
+## Install (from source)
 
 ```bash
 bun install
@@ -32,11 +57,6 @@ Production (single server serving UI + API):
 bun run build
 bun run start -- --project /absolute/path/to/your/project
 ```
-
-Options:
-
-- `--project <path>` (required): project root that contains `.sisyphus/`
-- `--port <number>` (optional): default 51234
 
 ## What It Reads (File-Based)
 

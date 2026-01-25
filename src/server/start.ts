@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { Hono } from 'hono'
+import { join } from 'node:path'
 import { parseArgs } from 'util'
 import { createApi } from "./api"
 import { createDashboardStore } from "./dashboard"
@@ -14,7 +15,13 @@ const { values } = parseArgs({
   allowPositionals: true,
 })
 
-const project = values.project || '.'
+const project = values.project
+if (!project) {
+  console.error('Error: --project is required')
+  console.error('Usage: oh-my-opencode-dashboard --project /absolute/path/to/your/project [--port 51234]')
+  process.exit(1)
+}
+
 const port = parseInt(values.port || '51234')
 
 const app = new Hono()
@@ -28,6 +35,8 @@ const store = createDashboardStore({
 
 app.route('/api', createApi(store))
 
+const distRoot = join(import.meta.dir, '../../dist')
+
 // SPA fallback middleware
 app.use('*', async (c, next) => {
   const path = c.req.path
@@ -39,7 +48,7 @@ app.use('*', async (c, next) => {
   
   // For non-API routes without extensions, serve index.html
   if (!path.includes('.')) {
-    const indexFile = Bun.file('dist/index.html')
+    const indexFile = Bun.file(join(distRoot, 'index.html'))
     if (await indexFile.exists()) {
       return c.html(await indexFile.text())
     }
@@ -47,7 +56,8 @@ app.use('*', async (c, next) => {
   }
   
   // For static files with extensions, try to serve them
-  const file = Bun.file(`dist${path}`)
+  const relativePath = path.startsWith('/') ? path.slice(1) : path
+  const file = Bun.file(join(distRoot, relativePath))
   if (await file.exists()) {
     const ext = path.split('.').pop() || ''
     const contentType = getContentType(ext)

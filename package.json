@@ -1,8 +1,27 @@
 {
-  "name": "oh-my-opencode-dashboard",
+  "name": "@oh-my-opencode-dashboard/dashboard",
   "version": "0.0.1",
-  "private": true,
+  "description": "Local-only, read-only dashboard for viewing OhMyOpenCode agent progress",
+  "license": "SUL-1.0",
   "type": "module",
+  "bin": {
+    "oh-my-opencode-dashboard": "./src/server/start.ts"
+  },
+  "files": [
+    "dist",
+    "src",
+    "index.html",
+    "vite.config.ts",
+    "tsconfig.json",
+    "dashboard-ui.png",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  },
   "scripts": {
     "dev": "bun run src/cli/dev.ts",
     "dev:api": "bun run src/server/dev.ts",
