@@ -175,4 +175,38 @@ describe("buildDashboardPayload", () => {
       fs.rmSync(projectRoot, { recursive: true, force: true })
     }
   })
+
+  it("includes elapsed time in status pill when status is unknown and session meta is present", () => {
+    const storageRoot = mkStorageRoot()
+    const storage = getStorageRoots(storageRoot)
+    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "omo-project-"))
+    const sessionId = "ses_unknown"
+    const projectID = "proj_1"
+
+    try {
+      const sessionMetaDir = path.join(storage.session, projectID)
+      fs.mkdirSync(sessionMetaDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(sessionMetaDir, `${sessionId}.json`),
+        JSON.stringify({
+          id: sessionId,
+          projectID,
+          directory: projectRoot,
+          time: { created: 1000, updated: 1000 },
+        }),
+        "utf8"
+      )
+
+      const payload = buildDashboardPayload({
+        projectRoot,
+        storage,
+        nowMs: 65_000,
+      })
+
+      expect(payload.mainSession.statusPill).toBe("unknown (1m4s)")
+    } finally {
+      fs.rmSync(storageRoot, { recursive: true, force: true })
+      fs.rmSync(projectRoot, { recursive: true, force: true })
+    }
+  })
 })
