@@ -3,6 +3,10 @@
   "version": "0.0.3",
   "description": "Local-only, read-only dashboard for viewing OhMyOpenCode agent progress",
   "license": "SUL-1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WilliamJudge94/oh-my-opencode-dashboard"
+  },
   "type": "module",
   "bin": {
     "oh-my-opencode-dashboard": "./src/server/start.ts"

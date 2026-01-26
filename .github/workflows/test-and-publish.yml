@@ -25,6 +25,19 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
 
+      - name: Debug npm auth (sanitized)
+        run: |
+          echo "registry=$(npm config get registry)"
+          echo "userconfig=${NPM_CONFIG_USERCONFIG:-<unset>}"
+          npm config list
+          if [ -n "${NPM_CONFIG_USERCONFIG:-}" ] && [ -f "$NPM_CONFIG_USERCONFIG" ]; then
+            echo "--- .npmrc (sanitized) ---"
+            sed -E 's/(\_authToken=).*/\1***redacted***/' "$NPM_CONFIG_USERCONFIG" || true
+            echo "--------------------------"
+          fi
+          npm ping || true
+          npm whoami || true
+
       - name: Test
         run: bun test
 
@@ -71,4 +84,11 @@ jobs:
 
       - name: Publish
         if: steps.check.outputs.skip != 'true'
-        run: npm publish --provenance --access public
+        run: |
+          set -euo pipefail
+          npm publish --provenance --access public --loglevel verbose || {
+            echo "npm publish failed; dumping npm debug logs";
+            ls -la "$HOME/.npm/_logs" || true;
+            tail -n +1 "$HOME/.npm/_logs"/*-debug-0.log || true;
+            exit 1;
+          }
