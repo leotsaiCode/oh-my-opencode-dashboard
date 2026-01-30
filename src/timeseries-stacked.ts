@@ -3,7 +3,7 @@
  * Independent of React/DOM for testability.
  */
 
-export type AgentTone = "teal" | "red" | "green";
+export type AgentTone = "teal" | "red" | "green" | "sand";
 
 export interface StackedSegment {
   tone: AgentTone;
@@ -15,6 +15,7 @@ export interface AgentCounts {
   sisyphus: number;
   prometheus: number;
   atlas: number;
+  other: number;
 }
 
 /**
@@ -24,6 +25,7 @@ export interface AgentCounts {
  * 1. Sisyphus (teal) - bottom
  * 2. Prometheus (red) - middle  
  * 3. Atlas (green) - top
+ * 4. Other main agents (sand) - top
  * 
  * @param counts - Agent counts for this bucket
  * @param scaleMax - Maximum value for scaling (must be > 0)
@@ -45,9 +47,10 @@ export function computeStackedSegments(
     sisyphus: Math.max(0, Number.isFinite(counts.sisyphus) ? counts.sisyphus : 0),
     prometheus: Math.max(0, Number.isFinite(counts.prometheus) ? counts.prometheus : 0),
     atlas: Math.max(0, Number.isFinite(counts.atlas) ? counts.atlas : 0),
+    other: Math.max(0, Number.isFinite(counts.other) ? counts.other : 0),
   };
 
-  const total = sanitized.sisyphus + sanitized.prometheus + sanitized.atlas;
+  const total = sanitized.sisyphus + sanitized.prometheus + sanitized.atlas + sanitized.other;
   if (total === 0) {
     return [];
   }
@@ -57,6 +60,7 @@ export function computeStackedSegments(
     sisyphus: (sanitized.sisyphus / scaleMax) * chartHeight,
     prometheus: (sanitized.prometheus / scaleMax) * chartHeight,
     atlas: (sanitized.atlas / scaleMax) * chartHeight,
+    other: (sanitized.other / scaleMax) * chartHeight,
   };
 
   // Round to pixels, ensuring sum never exceeds chartHeight
@@ -64,10 +68,11 @@ export function computeStackedSegments(
     sisyphus: Math.max(1, Math.round(rawHeights.sisyphus)) * (sanitized.sisyphus > 0 ? 1 : 0),
     prometheus: Math.max(1, Math.round(rawHeights.prometheus)) * (sanitized.prometheus > 0 ? 1 : 0),
     atlas: Math.max(1, Math.round(rawHeights.atlas)) * (sanitized.atlas > 0 ? 1 : 0),
+    other: Math.max(1, Math.round(rawHeights.other)) * (sanitized.other > 0 ? 1 : 0),
   };
 
   // Ensure non-zero agents remain visible when possible
-  let totalRounded = roundedHeights.sisyphus + roundedHeights.prometheus + roundedHeights.atlas;
+  let totalRounded = roundedHeights.sisyphus + roundedHeights.prometheus + roundedHeights.atlas + roundedHeights.other;
   
   // Distribute any overflow reduction fairly
   if (totalRounded > chartHeight) {
@@ -76,6 +81,7 @@ export function computeStackedSegments(
       { key: 'sisyphus' as keyof typeof roundedHeights, height: roundedHeights.sisyphus },
       { key: 'prometheus' as keyof typeof roundedHeights, height: roundedHeights.prometheus },
       { key: 'atlas' as keyof typeof roundedHeights, height: roundedHeights.atlas },
+      { key: 'other' as keyof typeof roundedHeights, height: roundedHeights.other },
     ].filter(w => w.height > 0);
 
     if (weights.length > 0) {
@@ -93,7 +99,7 @@ export function computeStackedSegments(
       }
       
       // If still over, trim from largest segments
-      totalRounded = roundedHeights.sisyphus + roundedHeights.prometheus + roundedHeights.atlas;
+      totalRounded = roundedHeights.sisyphus + roundedHeights.prometheus + roundedHeights.atlas + roundedHeights.other;
       while (totalRounded > chartHeight) {
         const sortedWeights = weights
           .map(w => ({ ...w, height: roundedHeights[w.key] }))
@@ -138,6 +144,16 @@ export function computeStackedSegments(
       tone: "green",
       y: currentY,
       height: roundedHeights.atlas,
+    });
+  }
+
+  // Other main agents (sand) - top
+  if (roundedHeights.other > 0) {
+    currentY -= roundedHeights.other;
+    segments.push({
+      tone: "sand",
+      y: currentY,
+      height: roundedHeights.other,
     });
   }
 

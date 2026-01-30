@@ -79,7 +79,15 @@ function hasSensitiveKeys(value: unknown): boolean {
 
 const createStore = (): DashboardStore => ({
   getSnapshot: (): DashboardPayload => ({
-    mainSession: { agent: "x", currentModel: null, currentTool: "-", lastUpdatedLabel: "never", session: "s", statusPill: "idle" },
+    mainSession: {
+      agent: "x",
+      currentModel: null,
+      currentTool: "-",
+      lastUpdatedLabel: "never",
+      session: "s",
+      sessionId: null,
+      statusPill: "idle",
+    },
     planProgress: { name: "p", completed: 0, total: 0, path: "", statusPill: "not started", steps: [] as PlanStep[] },
     backgroundTasks: [],
     mainSessionTasks: [],

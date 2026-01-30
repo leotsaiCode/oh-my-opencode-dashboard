@@ -63,6 +63,266 @@ type TimeSeries = {
   series: TimeSeriesSeries[];
 };
 
+function toNonNegativeFinite(value: unknown): number {
+  if (typeof value !== "number") return 0;
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, value);
+}
+
+export function computeOtherMainAgentsCount(params: {
+  overall: unknown;
+  background: unknown;
+  sisyphus: unknown;
+  prometheus: unknown;
+  atlas: unknown;
+}): number {
+  const overall = toNonNegativeFinite(params.overall);
+  const background = toNonNegativeFinite(params.background);
+  const sisyphus = toNonNegativeFinite(params.sisyphus);
+  const prometheus = toNonNegativeFinite(params.prometheus);
+  const atlas = toNonNegativeFinite(params.atlas);
+
+  const mainTotal = Math.max(0, overall - background);
+  return Math.max(0, mainTotal - sisyphus - prometheus - atlas);
+}
+
+export function computeMainAgentsScaleMax(params: {
+  buckets: number;
+  overallValues: unknown[];
+  backgroundValues: unknown[];
+  sisyphusValues: unknown[];
+  prometheusValues: unknown[];
+  atlasValues: unknown[];
+}): number {
+  const buckets = Math.max(0, Math.floor(params.buckets));
+  let sumMax = 0;
+
+  for (let i = 0; i < buckets; i++) {
+    const sis = toNonNegativeFinite(params.sisyphusValues[i]);
+    const pro = toNonNegativeFinite(params.prometheusValues[i]);
+    const atl = toNonNegativeFinite(params.atlasValues[i]);
+    const other = computeOtherMainAgentsCount({
+      overall: params.overallValues[i],
+      background: params.backgroundValues[i],
+      sisyphus: sis,
+      prometheus: pro,
+      atlas: atl,
+    });
+    const s = sis + pro + atl + other;
+    if (s > sumMax) sumMax = s;
+  }
+
+  return Math.max(1, sumMax || 1);
+}
+
+export function TimeSeriesActivitySection(props: { timeSeries: TimeSeries }) {
+  const timeSeriesById = new Map<TimeSeriesSeriesId, TimeSeriesSeries>();
+  for (const s of props.timeSeries.series) {
+    if (s && typeof s.id === "string") {
+      timeSeriesById.set(s.id, s);
+    }
+  }
+
+  const buckets = Math.max(1, props.timeSeries.buckets);
+  const bucketMs = Math.max(1, props.timeSeries.bucketMs);
+  const viewBox = `0 0 ${buckets} 28`;
+  const minuteStep = Math.max(1, Math.round(60_000 / bucketMs));
+  const bucketStartMs = props.timeSeries.anchorMs - (buckets - 1) * bucketMs;
+
+  const overallValues = timeSeriesById.get("overall-main")?.values ?? [];
+
+  return (
+    <section className="timeSeries">
+      <div className="timeSeriesHeader">
+        <h2 className="timeSeriesTitle">Time-series activity</h2>
+        <p className="timeSeriesSub">Last 5 minutes</p>
+      </div>
+
+      <div className="timeSeriesRows">
+        {(
+          [
+            {
+              kind: "main-agents" as const,
+              label: "Main agents" as const,
+            },
+            {
+              kind: "single" as const,
+              label: "background tasks (total)",
+              tone: "muted" as const,
+              overlayId: "background-total" as const,
+              baseline: false,
+            },
+          ] as const
+        ).map((row) => {
+          const H = 28;
+          const padTop = 2;
+          const padBottom = 2;
+          const chartHeight = H - padTop - padBottom;
+          const baselineY = H - padBottom;
+          const barW = 0.85;
+          const barInset = (1 - barW) / 2;
+
+          if (row.kind === "main-agents") {
+            const sisyphusValues = timeSeriesById.get("agent:sisyphus")?.values ?? [];
+            const prometheusValues = timeSeriesById.get("agent:prometheus")?.values ?? [];
+            const atlasValues = timeSeriesById.get("agent:atlas")?.values ?? [];
+            const backgroundValues = timeSeriesById.get("background-total")?.values ?? [];
+
+            const scaleMax = computeMainAgentsScaleMax({
+              buckets,
+              overallValues,
+              backgroundValues,
+              sisyphusValues,
+              prometheusValues,
+              atlasValues,
+            });
+
+            return (
+              <div key="main-agents" className="timeSeriesRow">
+                <div className="timeSeriesRowLabel">{row.label}</div>
+                <div className="timeSeriesSvgWrap">
+                  <svg className="timeSeriesSvg" viewBox={viewBox} preserveAspectRatio="none" aria-hidden="true">
+                    {Array.from({ length: Math.floor(buckets / minuteStep) + 1 }, (_, idx) => {
+                      const x = idx * minuteStep;
+                      if (x < 0 || x > buckets) return null;
+                      return (
+                        <line
+                          key={`g-${bucketStartMs + x * bucketMs}`}
+                          className="timeSeriesGridline"
+                          x1={x}
+                          x2={x}
+                          y1={0}
+                          y2={H}
+                        />
+                      );
+                    })}
+
+                    {Array.from({ length: buckets }, (_, i) => {
+                      const bucketMsAt = bucketStartMs + i * bucketMs;
+                      const barX = i + barInset;
+
+                      const sis = toNonNegativeFinite(sisyphusValues[i]);
+                      const pro = toNonNegativeFinite(prometheusValues[i]);
+                      const atl = toNonNegativeFinite(atlasValues[i]);
+                      const other = computeOtherMainAgentsCount({
+                        overall: overallValues[i],
+                        background: backgroundValues[i],
+                        sisyphus: sis,
+                        prometheus: pro,
+                        atlas: atl,
+                      });
+
+                      const segments = computeStackedSegments(
+                        {
+                          sisyphus: sis,
+                          prometheus: pro,
+                          atlas: atl,
+                          other,
+                        },
+                        scaleMax,
+                        chartHeight
+                      );
+
+                      if (segments.length === 0) return null;
+                      return segments.map((seg) => (
+                        <rect
+                          key={`main-agents-${bucketMsAt}-${seg.tone}`}
+                          className={`timeSeriesBar timeSeriesBar--${seg.tone}`}
+                          x={barX}
+                          y={padTop + seg.y}
+                          width={barW}
+                          height={seg.height}
+                        />
+                      ));
+                    })}
+                  </svg>
+                </div>
+              </div>
+            );
+          }
+
+          const overlayValues = timeSeriesById.get(row.overlayId)?.values ?? [];
+          const baselineMax = row.baseline ? maxCount(overallValues) : 0;
+          const overlayMax = maxCount(overlayValues);
+          const scaleMax = Math.max(1, row.baseline ? Math.max(baselineMax, overlayMax) : overlayMax || 1);
+
+          return (
+            <div key={row.overlayId} className="timeSeriesRow" data-tone={row.tone}>
+              <div className="timeSeriesRowLabel">{row.label}</div>
+              <div className="timeSeriesSvgWrap">
+                <svg className="timeSeriesSvg" viewBox={viewBox} preserveAspectRatio="none" aria-hidden="true">
+                  {Array.from({ length: Math.floor(buckets / minuteStep) + 1 }, (_, idx) => {
+                    const x = idx * minuteStep;
+                    if (x < 0 || x > buckets) return null;
+                    return (
+                      <line
+                        key={`g-${bucketStartMs + x * bucketMs}`}
+                        className="timeSeriesGridline"
+                        x1={x}
+                        x2={x}
+                        y1={0}
+                        y2={H}
+                      />
+                    );
+                  })}
+
+                  {row.baseline
+                    ? overallValues.slice(0, buckets).map((v, i) => {
+                        const h = barHeight(v ?? 0, scaleMax, chartHeight);
+                        if (!h) return null;
+                        const barX = i + barInset;
+                        const bucketMsAt = bucketStartMs + i * bucketMs;
+                        return (
+                          <rect
+                            key={`b-${bucketMsAt}`}
+                            className="timeSeriesBarBaseline"
+                            x={barX}
+                            y={baselineY - h}
+                            width={barW}
+                            height={h}
+                          />
+                        );
+                      })
+                    : null}
+
+                  {overlayValues.slice(0, buckets).map((v, i) => {
+                    const h = barHeight(v ?? 0, scaleMax, chartHeight);
+                    if (!h) return null;
+                    const barX = i + barInset;
+                    const bucketMsAt = bucketStartMs + i * bucketMs;
+                    return (
+                      <rect
+                        key={`${row.overlayId}-${bucketMsAt}`}
+                        className="timeSeriesBar"
+                        x={barX}
+                        y={baselineY - h}
+                        width={barW}
+                        height={h}
+                      />
+                    );
+                  })}
+                </svg>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="timeSeriesAxisBottom" aria-hidden="true">
+        <div />
+        <div className="timeSeriesAxisBottomLabels">
+          <span className="timeSeriesAxisBottomLabel">-5m</span>
+          <span className="timeSeriesAxisBottomLabel">-4m</span>
+          <span className="timeSeriesAxisBottomLabel">-3m</span>
+          <span className="timeSeriesAxisBottomLabel">-2m</span>
+          <span className="timeSeriesAxisBottomLabel">-1m</span>
+          <span className="timeSeriesAxisBottomLabel">Now</span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 type DashboardPayload = {
   mainSession: {
     agent: string;
@@ -732,15 +992,6 @@ export default function App() {
   const liveLabel = connected ? "Live" : "Disconnected";
   const liveTone = connected ? "teal" : "sand";
 
-  const timeSeriesById = React.useMemo(() => {
-    const map = new Map<TimeSeriesSeriesId, TimeSeriesSeries>();
-    for (const s of data.timeSeries.series) {
-      if (s && typeof s.id === "string") {
-        map.set(s.id, s);
-      }
-    }
-    return map;
-  }, [data.timeSeries.series]);
 
   const fetchToolCalls = React.useCallback(async (sessionId: string, opts: { force: boolean }) => {
     const existing = toolCallsBySessionRef.current.get(sessionId);
@@ -871,14 +1122,6 @@ export default function App() {
     }
   }, [connected, data.backgroundTasks, data.mainSessionTasks, expandedBgTaskIds, expandedMainTaskIds, fetchToolCalls]);
 
-  const buckets = Math.max(1, data.timeSeries.buckets);
-  const bucketMs = Math.max(1, data.timeSeries.bucketMs);
-  const viewBox = `0 0 ${buckets} 28`;
-  const minuteStep = Math.max(1, Math.round(60_000 / bucketMs));
-  const bucketStartMs = data.timeSeries.anchorMs - (buckets - 1) * bucketMs;
-
-  const overallValues = timeSeriesById.get("overall-main")?.values ?? [];
-
   return (
     <div className="page">
       <div className="container">
@@ -923,201 +1166,7 @@ export default function App() {
         </header>
 
         <main className="stack">
-          <section className="timeSeries">
-            <div className="timeSeriesHeader">
-              <h2 className="timeSeriesTitle">Time-series activity</h2>
-              <p className="timeSeriesSub">Last 5 minutes</p>
-            </div>
-
-            <div className="timeSeriesAxisTop" aria-hidden="true">
-              <div />
-              <div className="timeSeriesAxisTopLabels">
-                <span className="timeSeriesAxisTopLabel">-5m</span>
-                <span className="timeSeriesAxisTopLabel">-4m</span>
-                <span className="timeSeriesAxisTopLabel">-3m</span>
-                <span className="timeSeriesAxisTopLabel">-1m</span>
-              </div>
-            </div>
-
-            <div className="timeSeriesRows">
-              {(
-                [
-                  {
-                    kind: "main-agents" as const,
-                    label: "Main agents" as const,
-                  },
-                  {
-                    kind: "single" as const,
-                    label: "background tasks (total)",
-                    tone: "muted" as const,
-                    overlayId: "background-total" as const,
-                    baseline: false,
-                  },
-                ] as const
-              ).map((row) => {
-                const H = 28;
-                const padTop = 2;
-                const padBottom = 2;
-                const chartHeight = H - padTop - padBottom;
-                const baselineY = H - padBottom;
-                const barW = 0.85;
-                const barInset = (1 - barW) / 2;
-
-                if (row.kind === "main-agents") {
-                  const sisyphusValues = timeSeriesById.get("agent:sisyphus")?.values ?? [];
-                  const prometheusValues = timeSeriesById.get("agent:prometheus")?.values ?? [];
-                  const atlasValues = timeSeriesById.get("agent:atlas")?.values ?? [];
-
-                  let sumMax = 0;
-                  for (let i = 0; i < buckets; i++) {
-                    const rawSis = sisyphusValues[i];
-                    const rawPro = prometheusValues[i];
-                    const rawAtl = atlasValues[i];
-                    const sis = typeof rawSis === "number" && Number.isFinite(rawSis) ? Math.max(0, rawSis) : 0;
-                    const pro = typeof rawPro === "number" && Number.isFinite(rawPro) ? Math.max(0, rawPro) : 0;
-                    const atl = typeof rawAtl === "number" && Number.isFinite(rawAtl) ? Math.max(0, rawAtl) : 0;
-                    const s = sis + pro + atl;
-                    if (s > sumMax) sumMax = s;
-                  }
-
-                  const scaleMax = Math.max(1, sumMax || 1);
-
-                  return (
-                    <div key="main-agents" className="timeSeriesRow">
-                      <div className="timeSeriesRowLabel">{row.label}</div>
-                      <div className="timeSeriesSvgWrap">
-                        <svg className="timeSeriesSvg" viewBox={viewBox} preserveAspectRatio="none" aria-hidden="true">
-                          {Array.from({ length: Math.floor(buckets / minuteStep) + 1 }, (_, idx) => {
-                            const x = idx * minuteStep;
-                            if (x < 0 || x > buckets) return null;
-                            return (
-                              <line
-                                key={`g-${bucketStartMs + x * bucketMs}`}
-                                className="timeSeriesGridline"
-                                x1={x}
-                                x2={x}
-                                y1={0}
-                                y2={H}
-                              />
-                            );
-                          })}
-
-                          {Array.from({ length: buckets }, (_, i) => {
-                            const bucketMsAt = bucketStartMs + i * bucketMs;
-                            const barX = i + barInset;
-                            const rawSis = sisyphusValues[i];
-                            const rawPro = prometheusValues[i];
-                            const rawAtl = atlasValues[i];
-                            const sis = typeof rawSis === "number" && Number.isFinite(rawSis) ? Math.max(0, rawSis) : 0;
-                            const pro = typeof rawPro === "number" && Number.isFinite(rawPro) ? Math.max(0, rawPro) : 0;
-                            const atl = typeof rawAtl === "number" && Number.isFinite(rawAtl) ? Math.max(0, rawAtl) : 0;
-                            const segments = computeStackedSegments(
-                              {
-                                sisyphus: sis,
-                                prometheus: pro,
-                                atlas: atl,
-                              },
-                              scaleMax,
-                              chartHeight
-                            );
-
-                            if (segments.length === 0) return null;
-                            return segments.map((seg) => (
-                              <rect
-                                key={`main-agents-${bucketMsAt}-${seg.tone}`}
-                                className={`timeSeriesBar timeSeriesBar--${seg.tone}`}
-                                x={barX}
-                                y={padTop + seg.y}
-                                width={barW}
-                                height={seg.height}
-                              />
-                            ));
-                          })}
-                        </svg>
-                      </div>
-                    </div>
-                  );
-                }
-
-                const overlayValues = timeSeriesById.get(row.overlayId)?.values ?? [];
-                const baselineMax = row.baseline ? maxCount(overallValues) : 0;
-                const overlayMax = maxCount(overlayValues);
-                const scaleMax = Math.max(1, row.baseline ? Math.max(baselineMax, overlayMax) : overlayMax || 1);
-
-                return (
-                  <div key={row.overlayId} className="timeSeriesRow" data-tone={row.tone}>
-                    <div className="timeSeriesRowLabel">{row.label}</div>
-                    <div className="timeSeriesSvgWrap">
-                      <svg className="timeSeriesSvg" viewBox={viewBox} preserveAspectRatio="none" aria-hidden="true">
-                        {Array.from({ length: Math.floor(buckets / minuteStep) + 1 }, (_, idx) => {
-                          const x = idx * minuteStep;
-                          if (x < 0 || x > buckets) return null;
-                          return (
-                            <line
-                              key={`g-${bucketStartMs + x * bucketMs}`}
-                              className="timeSeriesGridline"
-                              x1={x}
-                              x2={x}
-                              y1={0}
-                              y2={H}
-                            />
-                          );
-                        })}
-
-                        {row.baseline
-                          ? overallValues.slice(0, buckets).map((v, i) => {
-                              const h = barHeight(v ?? 0, scaleMax, chartHeight);
-                              if (!h) return null;
-                              const barX = i + barInset;
-                              const bucketMsAt = bucketStartMs + i * bucketMs;
-                              return (
-                                <rect
-                                  key={`b-${bucketMsAt}`}
-                                  className="timeSeriesBarBaseline"
-                                  x={barX}
-                                  y={baselineY - h}
-                                  width={barW}
-                                  height={h}
-                                />
-                              );
-                            })
-                          : null}
-
-                        {overlayValues.slice(0, buckets).map((v, i) => {
-                          const h = barHeight(v ?? 0, scaleMax, chartHeight);
-                          if (!h) return null;
-                          const barX = i + barInset;
-                          const bucketMsAt = bucketStartMs + i * bucketMs;
-                          return (
-                            <rect
-                              key={`${row.overlayId}-${bucketMsAt}`}
-                              className="timeSeriesBar"
-                              x={barX}
-                              y={baselineY - h}
-                              width={barW}
-                              height={h}
-                            />
-                          );
-                        })}
-                      </svg>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="timeSeriesAxisBottom" aria-hidden="true">
-              <div />
-              <div className="timeSeriesAxisBottomLabels">
-                <span className="timeSeriesAxisBottomLabel">-5m</span>
-                <span className="timeSeriesAxisBottomLabel">-4m</span>
-                <span className="timeSeriesAxisBottomLabel">-3m</span>
-                <span className="timeSeriesAxisBottomLabel">-2m</span>
-                <span className="timeSeriesAxisBottomLabel">-1m</span>
-                <span className="timeSeriesAxisBottomLabel">Now</span>
-              </div>
-            </div>
-          </section>
+          <TimeSeriesActivitySection timeSeries={data.timeSeries} />
 
           <section className="grid2">
             <article className="card">

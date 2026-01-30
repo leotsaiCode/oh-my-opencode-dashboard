@@ -4,21 +4,21 @@ import { computeStackedSegments, AgentCounts, StackedSegment } from "./timeserie
 describe("computeStackedSegments", () => {
   describe("Edge cases", () => {
     it("should return empty array when chartHeight <= 0", () => {
-      const counts: AgentCounts = { sisyphus: 10, prometheus: 5, atlas: 3 };
+      const counts: AgentCounts = { sisyphus: 10, prometheus: 5, atlas: 3, other: 0 };
       
       expect(computeStackedSegments(counts, 20, 0)).toEqual([]);
       expect(computeStackedSegments(counts, 20, -5)).toEqual([]);
     });
 
     it("should return empty array when scaleMax <= 0", () => {
-      const counts: AgentCounts = { sisyphus: 10, prometheus: 5, atlas: 3 };
+      const counts: AgentCounts = { sisyphus: 10, prometheus: 5, atlas: 3, other: 0 };
       
       expect(computeStackedSegments(counts, 0, 100)).toEqual([]);
       expect(computeStackedSegments(counts, -10, 100)).toEqual([]);
     });
 
     it("should return empty array when all counts are zero", () => {
-      const counts: AgentCounts = { sisyphus: 0, prometheus: 0, atlas: 0 };
+      const counts: AgentCounts = { sisyphus: 0, prometheus: 0, atlas: 0, other: 0 };
       
       const result = computeStackedSegments(counts, 20, 100);
       expect(result).toEqual([]);
@@ -29,6 +29,7 @@ describe("computeStackedSegments", () => {
         sisyphus: NaN,
         prometheus: Infinity,
         atlas: -5,
+        other: NaN,
       } as unknown as AgentCounts;
       
       const result = computeStackedSegments(invalidCounts, 20, 100);
@@ -40,6 +41,7 @@ describe("computeStackedSegments", () => {
         sisyphus: 10,
         prometheus: NaN,
         atlas: -3,
+        other: Infinity,
       } as unknown as AgentCounts;
       
       const result = computeStackedSegments(mixedCounts, 20, 100);
@@ -54,7 +56,7 @@ describe("computeStackedSegments", () => {
 
   describe("Single agent scenarios", () => {
     it("should return one segment when only sisyphus is non-zero", () => {
-      const counts: AgentCounts = { sisyphus: 10, prometheus: 0, atlas: 0 };
+      const counts: AgentCounts = { sisyphus: 10, prometheus: 0, atlas: 0, other: 0 };
       
       const result = computeStackedSegments(counts, 20, 100);
       expect(result).toHaveLength(1);
@@ -66,7 +68,7 @@ describe("computeStackedSegments", () => {
     });
 
     it("should return one segment when only prometheus is non-zero", () => {
-      const counts: AgentCounts = { sisyphus: 0, prometheus: 15, atlas: 0 };
+      const counts: AgentCounts = { sisyphus: 0, prometheus: 15, atlas: 0, other: 0 };
       
       const result = computeStackedSegments(counts, 30, 120);
       expect(result).toHaveLength(1);
@@ -78,7 +80,7 @@ describe("computeStackedSegments", () => {
     });
 
     it("should return one segment when only atlas is non-zero", () => {
-      const counts: AgentCounts = { sisyphus: 0, prometheus: 0, atlas: 8 };
+      const counts: AgentCounts = { sisyphus: 0, prometheus: 0, atlas: 8, other: 0 };
       
       const result = computeStackedSegments(counts, 16, 80);
       expect(result).toHaveLength(1);
@@ -90,7 +92,7 @@ describe("computeStackedSegments", () => {
     });
 
     it("should round to at least 1px for non-zero values", () => {
-      const counts: AgentCounts = { sisyphus: 1, prometheus: 0, atlas: 0 };
+      const counts: AgentCounts = { sisyphus: 1, prometheus: 0, atlas: 0, other: 0 };
       
       const result = computeStackedSegments(counts, 1000, 100);
       expect(result).toHaveLength(1);
@@ -100,7 +102,7 @@ describe("computeStackedSegments", () => {
 
   describe("Multiple agent scenarios", () => {
     it("should return multiple segments in correct order (bottom to top)", () => {
-      const counts: AgentCounts = { sisyphus: 10, prometheus: 20, atlas: 15 };
+      const counts: AgentCounts = { sisyphus: 10, prometheus: 20, atlas: 15, other: 0 };
       
       const result = computeStackedSegments(counts, 50, 100);
       expect(result).toHaveLength(3);
@@ -116,7 +118,7 @@ describe("computeStackedSegments", () => {
     });
 
     it("should correctly calculate heights for all agents", () => {
-      const counts: AgentCounts = { sisyphus: 10, prometheus: 20, atlas: 15 };
+      const counts: AgentCounts = { sisyphus: 10, prometheus: 20, atlas: 15, other: 0 };
       
       const result = computeStackedSegments(counts, 50, 100);
       const totalHeight = result.reduce((sum, seg) => sum + seg.height, 0);
@@ -130,7 +132,7 @@ describe("computeStackedSegments", () => {
     });
 
     it("should handle zero values mixed with non-zero values", () => {
-      const counts: AgentCounts = { sisyphus: 10, prometheus: 0, atlas: 15 };
+      const counts: AgentCounts = { sisyphus: 10, prometheus: 0, atlas: 15, other: 0 };
       
       const result = computeStackedSegments(counts, 30, 90);
       expect(result).toHaveLength(2);
@@ -142,11 +144,21 @@ describe("computeStackedSegments", () => {
       // Check positioning
       expect(result[0].y).toBeGreaterThan(result[1].y);
     });
+    it("should include sand segment when other is non-zero", () => {
+      const counts: AgentCounts = { sisyphus: 10, prometheus: 20, atlas: 15, other: 5 };
+      const result = computeStackedSegments(counts, 50, 100);
+      expect(result).toHaveLength(4);
+
+      expect(result[0].tone).toBe("teal");
+      expect(result[1].tone).toBe("red");
+      expect(result[2].tone).toBe("green");
+      expect(result[3].tone).toBe("sand");
+    });
   });
 
   describe("Clamping and overflow behavior", () => {
     it("should ensure sum of heights never exceeds chartHeight", () => {
-      const counts: AgentCounts = { sisyphus: 100, prometheus: 100, atlas: 100 };
+      const counts: AgentCounts = { sisyphus: 100, prometheus: 100, atlas: 100, other: 100 };
       
       const result = computeStackedSegments(counts, 100, 50); // Should overflow
       const totalHeight = result.reduce((sum, seg) => sum + seg.height, 0);
@@ -155,17 +167,17 @@ describe("computeStackedSegments", () => {
     });
 
     it("should preserve at least 1px for non-zero agents when possible", () => {
-      const counts: AgentCounts = { sisyphus: 1, prometheus: 1, atlas: 1 };
+      const counts: AgentCounts = { sisyphus: 1, prometheus: 1, atlas: 1, other: 1 };
       
       const result = computeStackedSegments(counts, 100, 10);
       
       // All agents should be visible with at least 1px each
-      expect(result).toHaveLength(3);
+      expect(result).toHaveLength(4);
       expect(result.every(seg => seg.height >= 1)).toBe(true);
     });
 
     it("should distribute overflow reduction fairly", () => {
-      const counts: AgentCounts = { sisyphus: 40, prometheus: 35, atlas: 25 };
+      const counts: AgentCounts = { sisyphus: 40, prometheus: 35, atlas: 25, other: 10 };
       
       const result = computeStackedSegments(counts, 100, 80);
       const totalHeight = result.reduce((sum, seg) => sum + seg.height, 0);
@@ -178,7 +190,7 @@ describe("computeStackedSegments", () => {
     });
 
     it("should handle extreme overflow gracefully", () => {
-      const counts: AgentCounts = { sisyphus: 1000, prometheus: 1000, atlas: 1000 };
+      const counts: AgentCounts = { sisyphus: 1000, prometheus: 1000, atlas: 1000, other: 1000 };
       
       const result = computeStackedSegments(counts, 100, 5);
       const totalHeight = result.reduce((sum, seg) => sum + seg.height, 0);
@@ -191,7 +203,7 @@ describe("computeStackedSegments", () => {
 
   describe("Deterministic behavior", () => {
     it("should produce identical results for identical inputs", () => {
-      const counts: AgentCounts = { sisyphus: 15, prometheus: 25, atlas: 10 };
+      const counts: AgentCounts = { sisyphus: 15, prometheus: 25, atlas: 10, other: 0 };
       
       const result1 = computeStackedSegments(counts, 60, 100);
       const result2 = computeStackedSegments(counts, 60, 100);
@@ -201,10 +213,10 @@ describe("computeStackedSegments", () => {
 
     it("should maintain consistent segment order regardless of input magnitudes", () => {
       const testCases = [
-        { sisyphus: 100, prometheus: 1, atlas: 1 },
-        { sisyphus: 1, prometheus: 100, atlas: 1 },
-        { sisyphus: 1, prometheus: 1, atlas: 100 },
-        { sisyphus: 50, prometheus: 25, atlas: 75 },
+        { sisyphus: 100, prometheus: 1, atlas: 1, other: 0 },
+        { sisyphus: 1, prometheus: 100, atlas: 1, other: 0 },
+        { sisyphus: 1, prometheus: 1, atlas: 100, other: 0 },
+        { sisyphus: 50, prometheus: 25, atlas: 75, other: 0 },
       ] as AgentCounts[];
       
       testCases.forEach(counts => {
@@ -230,7 +242,7 @@ describe("computeStackedSegments", () => {
 
   describe("Boundary conditions", () => {
     it("should handle very small chartHeight", () => {
-      const counts: AgentCounts = { sisyphus: 10, prometheus: 5, atlas: 3 };
+      const counts: AgentCounts = { sisyphus: 10, prometheus: 5, atlas: 3, other: 0 };
       
       const result = computeStackedSegments(counts, 20, 1);
       const totalHeight = result.reduce((sum, seg) => sum + seg.height, 0);
@@ -239,7 +251,7 @@ describe("computeStackedSegments", () => {
     });
 
     it("should handle very large scaleMax", () => {
-      const counts: AgentCounts = { sisyphus: 10, prometheus: 5, atlas: 3 };
+      const counts: AgentCounts = { sisyphus: 10, prometheus: 5, atlas: 3, other: 0 };
       
       const result = computeStackedSegments(counts, 1000000, 100);
       
@@ -249,7 +261,7 @@ describe("computeStackedSegments", () => {
     });
 
     it("should handle fractional results correctly", () => {
-      const counts: AgentCounts = { sisyphus: 1, prometheus: 1, atlas: 1 };
+      const counts: AgentCounts = { sisyphus: 1, prometheus: 1, atlas: 1, other: 1 };
       
       const result = computeStackedSegments(counts, 3, 10);
       

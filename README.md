@@ -8,7 +8,19 @@ Local-only, read-only dashboard for viewing OhMyOpenCode agent progress.
 
 - Show plan progress from `.sisyphus/boulder.json` + the active plan markdown.
 - Show a best-effort view of background tasks from persisted OpenCode session artifacts.
+- Show main-session activity + recent tool-call activity as lightweight signals.
 - Never render prompts, tool arguments, or raw tool outputs.
+
+## What You Can See
+
+- Main session: agent, current tool/model, session label/id, last update, status.
+- Plan progress: checkbox progress + optional step list (parsed from plan markdown).
+- Main session task row: a single roll-up row for the detected main session.
+- Background tasks: best-effort inferred from `delegate_task` tool parts; expandable.
+- Tool calls (metadata only): per-session tool name/status/timestamp, capped for safety.
+- Time-series activity: last 5 minutes of tool-call counts (main agents + background total).
+- Sound notifications (optional): dings when progress advances / question appears / waiting for user.
+- Raw JSON (redacted): copy the API payload that the UI is rendering.
 
 ## Requirements
 
@@ -73,6 +85,11 @@ bun run start -- --project /absolute/path/to/your/project
   - Plan file at `boulder.active_plan`
 - OpenCode storage:
   - `${XDG_DATA_HOME ?? ~/.local/share}/opencode/storage/{session,message,part}`
+
+## How It Chooses A Session
+
+- If `.sisyphus/boulder.json` exists, it prefers the most recent `session_ids[]` entry that exists on disk.
+- Otherwise it falls back to the most recently updated OpenCode session whose `meta.directory` exactly matches your `--project` path (realpath-normalized).
 
 ## Vanilla OpenCode (No OhMyOpenCode)
 
