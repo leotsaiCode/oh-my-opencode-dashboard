@@ -6,7 +6,7 @@ import { deriveToolCalls, MAX_TOOL_CALL_MESSAGES, MAX_TOOL_CALLS } from "../inge
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/
 
-export function createApi(opts: { store: DashboardStore; storageRoot: string }): Hono {
+export function createApi(opts: { store: DashboardStore; storageRoot: string; projectRoot: string }): Hono {
   const api = new Hono()
 
   api.get("/health", (c) => {

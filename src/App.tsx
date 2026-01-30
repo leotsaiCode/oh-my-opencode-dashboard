@@ -70,6 +70,7 @@ type DashboardPayload = {
     currentModel: string;
     lastUpdatedLabel: string;
     session: string;
+    sessionId: string | null;
     statusPill: string;
   };
   planProgress: {
@@ -81,6 +82,7 @@ type DashboardPayload = {
     steps?: Array<{ checked: boolean; text: string }>;
   };
   backgroundTasks: BackgroundTask[];
+  mainSessionTasks: BackgroundTask[];
   timeSeries: TimeSeries;
   raw: unknown;
 };
@@ -200,6 +202,7 @@ const FALLBACK_DATA: DashboardPayload = {
     currentModel: "anthropic/claude-opus-4-5",
     lastUpdatedLabel: "just now",
     session: "qa-session",
+    sessionId: null,
     statusPill: "busy",
   },
   planProgress: {
@@ -223,6 +226,7 @@ const FALLBACK_DATA: DashboardPayload = {
       timeline: "2026-01-01T00:00:00Z: 2m",
     },
   ],
+  mainSessionTasks: [],
   timeSeries: makeZeroTimeSeries({
     windowMs: TIME_SERIES_DEFAULT_WINDOW_MS,
     bucketMs: TIME_SERIES_DEFAULT_BUCKET_MS,
@@ -419,6 +423,7 @@ function toDashboardPayload(json: unknown): DashboardPayload {
   const main = (anyJson.mainSession ?? anyJson.main_session ?? {}) as Record<string, unknown>;
   const plan = (anyJson.planProgress ?? anyJson.plan_progress ?? {}) as Record<string, unknown>;
   const tasks = (anyJson.backgroundTasks ?? anyJson.background_tasks ?? []) as unknown;
+  const mainTasks = (anyJson.mainSessionTasks ?? anyJson.main_session_tasks ?? []) as unknown;
 
   function parsePlanSteps(stepsInput: unknown): Array<{ checked: boolean; text: string }> {
     if (!Array.isArray(stepsInput)) return [];
@@ -459,6 +464,29 @@ function toDashboardPayload(json: unknown): DashboardPayload {
       })
     : FALLBACK_DATA.backgroundTasks;
 
+  const mainSessionTasks: BackgroundTask[] = Array.isArray(mainTasks)
+    ? mainTasks.map((t, idx) => {
+        const rec = (t ?? {}) as Record<string, unknown>;
+        return {
+          id: String(rec.id ?? rec.taskId ?? rec.task_id ?? `main-task-${idx + 1}`),
+          description: String(rec.description ?? rec.name ?? "(no description)"),
+          subline:
+            typeof rec.subline === "string"
+              ? rec.subline
+              : typeof rec.taskId === "string"
+                ? rec.taskId
+                : undefined,
+          agent: String(rec.agent ?? rec.worker ?? "unknown"),
+          lastModel: toNonEmptyString(rec.lastModel ?? rec.last_model) ?? "-",
+          sessionId: toNonEmptyString(rec.sessionId ?? rec.session_id),
+          status: String(rec.status ?? "queued"),
+          toolCalls: Number(rec.toolCalls ?? rec.tool_calls ?? 0) || 0,
+          lastTool: String(rec.lastTool ?? rec.last_tool ?? "-") || "-",
+          timeline: String(rec.timeline ?? "") || "",
+        };
+      })
+    : [];
+
   const completed = Number(plan.completed ?? plan.done ?? 0) || 0;
   const total = Number(plan.total ?? plan.count ?? 0) || 0;
   const steps = parsePlanSteps(plan.steps);
@@ -472,6 +500,7 @@ function toDashboardPayload(json: unknown): DashboardPayload {
       currentModel: toNonEmptyString(main.currentModel ?? main.current_model) ?? "-",
       lastUpdatedLabel: String(main.lastUpdatedLabel ?? main.last_updated ?? "just now"),
       session: String(main.session ?? main.session_id ?? FALLBACK_DATA.mainSession.session),
+      sessionId: toNonEmptyString(main.sessionId ?? main.session_id),
       statusPill: String(main.statusPill ?? main.status ?? FALLBACK_DATA.mainSession.statusPill),
     },
     planProgress: {
@@ -483,6 +512,7 @@ function toDashboardPayload(json: unknown): DashboardPayload {
       steps,
     },
     backgroundTasks,
+    mainSessionTasks,
     timeSeries,
     raw: json,
   };
@@ -500,9 +530,11 @@ export default function App() {
   const [errorHint, setErrorHint] = React.useState<string | null>(null);
 
   const [expandedBgTaskIds, setExpandedBgTaskIds] = React.useState<Set<string>>(() => new Set());
+  const [expandedMainTaskIds, setExpandedMainTaskIds] = React.useState<Set<string>>(() => new Set());
   const [toolCallsBySession, setToolCallsBySession] = React.useState<
     Map<string, { state: "idle" | "loading" | "ok" | "error"; data: ToolCallsResponse | null; lastFetchedAtMs: number | null }>
   >(() => new Map());
+  const toolCallsBySessionRef = React.useRef(toolCallsBySession);
   const toolCallsSeqRef = React.useRef<Map<string, number>>(new Map());
 
   const timerRef = React.useRef<number | null>(null);
@@ -526,6 +558,10 @@ export default function App() {
   React.useEffect(() => {
     soundEnabledRef.current = soundEnabled;
   }, [soundEnabled]);
+
+  React.useEffect(() => {
+    toolCallsBySessionRef.current = toolCallsBySession;
+  }, [toolCallsBySession]);
 
   React.useEffect(() => {
     try {
@@ -706,8 +742,8 @@ export default function App() {
     return map;
   }, [data.timeSeries.series]);
 
-  async function fetchToolCalls(sessionId: string, opts: { force: boolean }) {
-    const existing = toolCallsBySession.get(sessionId);
+  const fetchToolCalls = React.useCallback(async (sessionId: string, opts: { force: boolean }) => {
+    const existing = toolCallsBySessionRef.current.get(sessionId);
     if (!opts.force && existing?.data?.ok) return;
 
     const seq = (toolCallsSeqRef.current.get(sessionId) ?? 0) + 1;
@@ -747,7 +783,7 @@ export default function App() {
         return next;
       });
     }
-  }
+  }, []);
 
   function toggleBackgroundTaskExpanded(t: BackgroundTask) {
     const nextExpanded = !expandedBgTaskIds.has(t.id);
@@ -764,7 +800,7 @@ export default function App() {
     if (!sessionId) return;
 
     const isRunning = String(t.status ?? "").toLowerCase().trim() === "running";
-    const cached = toolCallsBySession.get(sessionId);
+    const cached = toolCallsBySessionRef.current.get(sessionId);
     if (isRunning) {
       void fetchToolCalls(sessionId, { force: true });
       return;
@@ -774,6 +810,66 @@ export default function App() {
     if (cached?.state === "loading") return;
     void fetchToolCalls(sessionId, { force: false });
   }
+
+  function toggleMainTaskExpanded(t: BackgroundTask) {
+    const nextExpanded = !expandedMainTaskIds.has(t.id);
+    setExpandedMainTaskIds((prev) => {
+      const next = new Set(prev);
+      if (nextExpanded) next.add(t.id);
+      else next.delete(t.id);
+      return next;
+    });
+
+    if (!nextExpanded) return;
+
+    const sessionId = toNonEmptyString(t.sessionId);
+    if (!sessionId) return;
+
+    const isRunning = String(t.status ?? "").toLowerCase().trim() === "running";
+    const cached = toolCallsBySessionRef.current.get(sessionId);
+    if (isRunning) {
+      void fetchToolCalls(sessionId, { force: true });
+      return;
+    }
+
+    if (cached?.data?.ok) return;
+    if (cached?.state === "loading") return;
+    void fetchToolCalls(sessionId, { force: false });
+  }
+
+  React.useEffect(() => {
+    if (!connected) return;
+
+    for (const t of data.backgroundTasks) {
+      const sessionId = toNonEmptyString(t.sessionId);
+      const cached = sessionId ? toolCallsBySessionRef.current.get(sessionId) : null;
+      const plan = computeToolCallsFetchPlan({
+        sessionId,
+        status: t.status,
+        cachedState: cached?.state ?? null,
+        cachedDataOk: Boolean(cached?.data?.ok),
+        isExpanded: expandedBgTaskIds.has(t.id),
+      });
+      if (plan.shouldFetch && sessionId) {
+        void fetchToolCalls(sessionId, { force: plan.force });
+      }
+    }
+
+    for (const t of data.mainSessionTasks) {
+      const sessionId = toNonEmptyString(t.sessionId);
+      const cached = sessionId ? toolCallsBySessionRef.current.get(sessionId) : null;
+      const plan = computeToolCallsFetchPlan({
+        sessionId,
+        status: t.status,
+        cachedState: cached?.state ?? null,
+        cachedDataOk: Boolean(cached?.data?.ok),
+        isExpanded: expandedMainTaskIds.has(t.id),
+      });
+      if (plan.shouldFetch && sessionId) {
+        void fetchToolCalls(sessionId, { force: plan.force });
+      }
+    }
+  }, [connected, data.backgroundTasks, data.mainSessionTasks, expandedBgTaskIds, expandedMainTaskIds, fetchToolCalls]);
 
   const buckets = Math.max(1, data.timeSeries.buckets);
   const bucketMs = Math.max(1, data.timeSeries.bucketMs);
@@ -1107,6 +1203,126 @@ export default function App() {
 
           <section className="card">
             <div className="cardHeader">
+              <h2>Main session tasks</h2>
+              <span className="badge">{data.mainSessionTasks.length}</span>
+            </div>
+
+            <div className="tableWrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>DESCRIPTION</th>
+                    <th>AGENT</th>
+                    <th>LAST MODEL</th>
+                    <th>STATUS</th>
+                    <th>TOOL CALLS</th>
+                    <th>LAST TOOL</th>
+                    <th>TIMELINE</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.mainSessionTasks.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="muted" style={{ padding: 16 }}>
+                        No main session tasks detected yet.
+                      </td>
+                    </tr>
+                  ) : null}
+                  {data.mainSessionTasks.map((t) => {
+                    const expanded = expandedMainTaskIds.has(t.id);
+                    const sessionId = toNonEmptyString(t.sessionId);
+                    const detailId = `main-toolcalls-${t.id}`;
+                    const entry = sessionId ? toolCallsBySession.get(sessionId) : null;
+                    const toolCalls = entry?.data?.ok ? entry.data.toolCalls : [];
+                    const showCapped = Boolean(entry?.data?.truncated);
+                    const caps = entry?.data?.caps;
+                    const showLoading = entry?.state === "loading";
+                    const showError = entry?.state === "error" && !entry?.data?.ok;
+                    const empty = sessionId ? toolCalls.length === 0 && !showLoading && !showError : true;
+
+                    return (
+                      <React.Fragment key={t.id}>
+                        <tr>
+                          <td>
+                            <div className="bgTaskRowTitleWrap">
+                              <button
+                                type="button"
+                                className="bgTaskToggle"
+                                onClick={() => toggleMainTaskExpanded(t)}
+                                aria-expanded={expanded}
+                                aria-controls={detailId}
+                                title={expanded ? "Collapse" : "Expand"}
+                                aria-label={expanded ? "Collapse tool calls" : "Expand tool calls"}
+                              />
+                              <div className="bgTaskRowTitleText">
+                                <div className="taskTitle">{t.description}</div>
+                                {t.subline ? <div className="taskSub mono">{t.subline}</div> : null}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="mono">{t.agent}</td>
+                          <td className="mono">{t.lastModel}</td>
+                          <td>
+                            <span className={`pill pill-${statusTone(t.status)}`}>{t.status}</span>
+                          </td>
+                          <td className="mono">{t.toolCalls}</td>
+                          <td className="mono">{t.lastTool}</td>
+                          <td className="mono muted">{formatBackgroundTaskTimelineCell(t.status, t.timeline)}</td>
+                        </tr>
+
+                        {expanded ? (
+                          <tr>
+                            <td colSpan={7} className="bgTaskDetailCell">
+                              <section id={detailId} aria-label="Tool calls" className="bgTaskDetail">
+                                <div className="mono muted bgTaskDetailHeader">
+                                  Tool calls (metadata only){showLoading && toolCalls.length > 0 ? " - refreshing" : ""}
+                                  {showCapped
+                                    ? ` - capped${caps ? ` (max ${caps.maxMessages} messages / ${caps.maxToolCalls} tool calls)` : ""}`
+                                    : ""}
+                                </div>
+
+                                {!sessionId ? (
+                                  <div className="muted bgTaskDetailEmpty">No session id available for this task.</div>
+                                ) : showError ? (
+                                  <div className="muted bgTaskDetailEmpty">Tool calls unavailable.</div>
+                                ) : showLoading && toolCalls.length === 0 ? (
+                                  <div className="muted bgTaskDetailEmpty">Loading tool calls...</div>
+                                ) : empty ? (
+                                  <div className="muted bgTaskDetailEmpty">No tool calls recorded.</div>
+                                ) : (
+                                  <div className="bgTaskToolCallsGrid">
+                                    {toolCalls.map((c) => (
+                                      <div key={c.callId} className="bgTaskToolCall">
+                                        <div className="bgTaskToolCallRow">
+                                          <div className="mono bgTaskToolCallTool" title={c.tool}>
+                                            {c.tool}
+                                          </div>
+                                          <div className="mono muted bgTaskToolCallStatus" title={c.status}>
+                                            {c.status}
+                                          </div>
+                                        </div>
+                                        <div className="mono muted bgTaskToolCallTime">{formatTime(c.createdAtMs)}</div>
+                                        <div className="mono muted bgTaskToolCallId" title={c.callId}>
+                                          {c.callId}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </section>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="card">
+            <div className="cardHeader">
               <h2>Background tasks</h2>
               <span className="badge">
                 {data.backgroundTasks.length}
@@ -1126,6 +1342,13 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
+                  {data.backgroundTasks.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="muted" style={{ padding: 16 }}>
+                        No background tasks detected yet. When you run background agents, they will appear here.
+                      </td>
+                    </tr>
+                  ) : null}
                   {data.backgroundTasks.map((t) => {
                     const expanded = expandedBgTaskIds.has(t.id);
                     const sessionId = toNonEmptyString(t.sessionId);

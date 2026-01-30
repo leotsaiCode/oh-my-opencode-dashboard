@@ -15,6 +15,10 @@ function mkStorageRoot(): string {
   return root
 }
 
+function mkProjectRoot(): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "omo-dashboard-project-"))
+}
+
 function writeMessageMeta(opts: {
   storageRoot: string
   sessionId: string
@@ -78,6 +82,7 @@ const createStore = (): DashboardStore => ({
     mainSession: { agent: "x", currentModel: null, currentTool: "-", lastUpdatedLabel: "never", session: "s", statusPill: "idle" },
     planProgress: { name: "p", completed: 0, total: 0, path: "", statusPill: "not started", steps: [] as PlanStep[] },
     backgroundTasks: [],
+    mainSessionTasks: [],
     timeSeries: {
       windowMs: 0,
       bucketMs: 0,
@@ -93,8 +98,9 @@ const createStore = (): DashboardStore => ({
 describe('API Routes', () => {
   it('should return health check', async () => {
     const storageRoot = mkStorageRoot()
+    const projectRoot = mkProjectRoot()
     const store = createStore()
-    const api = createApi({ store, storageRoot })
+    const api = createApi({ store, storageRoot, projectRoot })
 
     const res = await api.request("/health")
     expect(res.status).toBe(200)
@@ -103,8 +109,9 @@ describe('API Routes', () => {
 
   it('should return dashboard data without sensitive keys', async () => {
     const storageRoot = mkStorageRoot()
+    const projectRoot = mkProjectRoot()
     const store = createStore()
-    const api = createApi({ store, storageRoot })
+    const api = createApi({ store, storageRoot, projectRoot })
 
     const res = await api.request("/dashboard")
     expect(res.status).toBe(200)
@@ -122,8 +129,9 @@ describe('API Routes', () => {
 
   it('should reject invalid session IDs', async () => {
     const storageRoot = mkStorageRoot()
+    const projectRoot = mkProjectRoot()
     const store = createStore()
-    const api = createApi({ store, storageRoot })
+    const api = createApi({ store, storageRoot, projectRoot })
 
     const res = await api.request("/tool-calls/not_valid!")
     expect(res.status).toBe(400)
@@ -132,8 +140,9 @@ describe('API Routes', () => {
 
   it('should return 404 for missing sessions', async () => {
     const storageRoot = mkStorageRoot()
+    const projectRoot = mkProjectRoot()
     const store = createStore()
-    const api = createApi({ store, storageRoot })
+    const api = createApi({ store, storageRoot, projectRoot })
 
     const res = await api.request("/tool-calls/ses_missing")
     expect(res.status).toBe(404)
@@ -142,9 +151,10 @@ describe('API Routes', () => {
 
   it('should return empty tool calls for existing sessions', async () => {
     const storageRoot = mkStorageRoot()
+    const projectRoot = mkProjectRoot()
     writeMessageMeta({ storageRoot, sessionId: "ses_empty", messageId: "msg_1", created: 1000 })
     const store = createStore()
-    const api = createApi({ store, storageRoot })
+    const api = createApi({ store, storageRoot, projectRoot })
 
     const res = await api.request("/tool-calls/ses_empty")
     expect(res.status).toBe(200)
@@ -160,6 +170,7 @@ describe('API Routes', () => {
 
   it('should redact tool call payload fields', async () => {
     const storageRoot = mkStorageRoot()
+    const projectRoot = mkProjectRoot()
     writeMessageMeta({ storageRoot, sessionId: "ses_redact", messageId: "msg_1", created: 1000 })
     writeToolPart({
       storageRoot,
@@ -175,7 +186,7 @@ describe('API Routes', () => {
       },
     })
     const store = createStore()
-    const api = createApi({ store, storageRoot })
+    const api = createApi({ store, storageRoot, projectRoot })
 
     const res = await api.request("/tool-calls/ses_redact")
     expect(res.status).toBe(200)
@@ -185,4 +196,6 @@ describe('API Routes', () => {
     expect(data.toolCalls.length).toBe(1)
     expect(hasSensitiveKeys(data)).toBe(false)
   })
+
+  // /sessions was intentionally removed along with the manual session picker.
 })
