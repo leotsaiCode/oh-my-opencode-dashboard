@@ -111,12 +111,12 @@ const distRoot = join(import.meta.dir, '../../dist')
 // SPA fallback middleware
 app.use('*', async (c, next) => {
   const path = c.req.path
-  
+
   // Skip API routes - let them pass through
   if (path.startsWith('/api/')) {
     return await next()
   }
-  
+
   // For non-API routes without extensions, serve index.html
   if (!path.includes('.')) {
     const indexFile = Bun.file(join(distRoot, 'index.html'))
@@ -125,7 +125,7 @@ app.use('*', async (c, next) => {
     }
     return c.notFound()
   }
-  
+
   // For static files with extensions, try to serve them
   const relativePath = path.startsWith('/') ? path.slice(1) : path
   const file = Bun.file(join(distRoot, relativePath))
@@ -136,7 +136,7 @@ app.use('*', async (c, next) => {
       headers: { 'Content-Type': contentType }
     })
   }
-  
+
   return c.notFound()
 })
 
@@ -160,10 +160,12 @@ function getContentType(ext: string): string {
   return types[ext] || 'text/plain'
 }
 
+const hostname = process.env.OMO_DASHBOARD_HOST ?? '127.0.0.1'
+
 Bun.serve({
   fetch: app.fetch,
-  hostname: '127.0.0.1',
+  hostname,
   port,
 })
 
-console.log(`Server running on http://127.0.0.1:${port}`)
+console.log(`Server running on http://${hostname}:${port}`)

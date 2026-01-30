@@ -1,0 +1,15 @@
+﻿services:
+  dashboard:
+    container_name: oh-my-opencode-dashboard
+    build: .
+    image: oh-my-opencode-dashboard:${DASHBOARD_IMAGE_TAG:-latest}
+    restart: always
+    ports:
+      - "51234:51234"
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ENV:-Production}
+      IdGeneratorKey: ${ID_GENERATOR_KEY:-1}
+      OMO_DASHBOARD_HOST: "0.0.0.0"
+    volumes:
+      - ./:/project:ro
+      - ~/.local/share/opencode:/root/.local/share/opencode:ro

@@ -106,6 +106,32 @@ bun run build
 bun run start -- --project /absolute/path/to/your/project
 ```
 
+## Run with Docker Compose
+
+Copy env template:
+
+```bash
+cp .env.example .env
+```
+
+Start in background and build image:
+
+```bash
+docker compose up -d --build
+```
+
+Configurable env vars in `.env`:
+
+- `DASHBOARD_IMAGE_TAG` (default: `latest`)
+- `ContainerName` (default: `dashboard`)
+- `ENV` -> maps to `ASPNETCORE_ENVIRONMENT` (default: `Production`)
+- `ID_GENERATOR_KEY` (default: `1`)
+
+Compose behavior:
+
+- `restart: always`
+- `ports: 51234:51234`
+
 ## What It Reads (SQLite + Legacy)
 
 - Project (optional; OhMyOpenCode plan tracking):
