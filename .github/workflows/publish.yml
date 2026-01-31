@@ -1,53 +1,26 @@
-name: Test and Publish
+name: Publish
 
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows:
+      - Testing
+    types:
+      - completed
 
 permissions:
   contents: read
   id-token: write
 
 jobs:
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install
-        run: bun install --frozen-lockfile
-
-      - name: Debug npm auth (sanitized)
-        run: |
-          echo "registry=$(npm config get registry)"
-          echo "userconfig=${NPM_CONFIG_USERCONFIG:-<unset>}"
-          npm config list
-          if [ -n "${NPM_CONFIG_USERCONFIG:-}" ] && [ -f "$NPM_CONFIG_USERCONFIG" ]; then
-            echo "--- .npmrc (sanitized) ---"
-            sed -E 's/(\_authToken=).*/\1***redacted***/' "$NPM_CONFIG_USERCONFIG" || true
-            echo "--------------------------"
-          fi
-          npm ping || true
-          npm whoami || true
-
-      - name: Test
-        run: bun test
-
   publish:
     name: Publish
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' }}
     runs-on: ubuntu-latest
-    needs: test
     steps:
-      - name: Checkout
+      - name: Checkout triggering commit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Setup Node.js (OIDC)
         uses: actions/setup-node@v4
@@ -59,12 +32,6 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-
-      - name: Show Node/npm/bun versions (OIDC)
-        run: |
-          node --version
-          npm --version
-          bun --version
 
       - name: Install
         run: bun install --frozen-lockfile
