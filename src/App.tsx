@@ -63,6 +63,30 @@ type TimeSeries = {
   series: TimeSeriesSeries[];
 };
 
+type TokenUsageTotals = {
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+};
+
+type TokenUsageRow = {
+  model: string;
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+};
+
+type TokenUsage = {
+  totals: TokenUsageTotals;
+  rows: TokenUsageRow[];
+};
+
 function toNonNegativeFinite(value: unknown): number {
   if (typeof value !== "number") return 0;
   if (!Number.isFinite(value)) return 0;
@@ -344,6 +368,7 @@ type DashboardPayload = {
   backgroundTasks: BackgroundTask[];
   mainSessionTasks: BackgroundTask[];
   timeSeries: TimeSeries;
+  tokenUsage: TokenUsage;
   raw: unknown;
 };
 
@@ -494,6 +519,10 @@ const FALLBACK_DATA: DashboardPayload = {
     anchorMs: 0,
     serverNowMs: 0,
   }),
+  tokenUsage: {
+    totals: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    rows: [],
+  },
   raw: {
     ok: false,
     hint: "API not reachable yet. Using placeholder data.",
@@ -685,6 +714,67 @@ function toDashboardPayload(json: unknown): DashboardPayload {
   const tasks = (anyJson.backgroundTasks ?? anyJson.background_tasks ?? []) as unknown;
   const mainTasks = (anyJson.mainSessionTasks ?? anyJson.main_session_tasks ?? []) as unknown;
 
+  const tokenUsageDefault: TokenUsage = {
+    totals: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    rows: [],
+  };
+
+  function parseTokenUsage(input: unknown): TokenUsage {
+    if (!input || typeof input !== "object") return tokenUsageDefault;
+    const rec = input as Record<string, unknown>;
+
+    const rowsRaw = rec.rows;
+    const rows: TokenUsageRow[] = Array.isArray(rowsRaw)
+      ? rowsRaw
+          .map((row): TokenUsageRow | null => {
+            if (!row || typeof row !== "object") return null;
+            const r = row as Record<string, unknown>;
+
+            const model = toNonEmptyString(r.model ?? r.id ?? r.key);
+            if (!model) return null;
+
+            const input = toNonNegativeCount(r.input ?? r.input_tokens);
+            const output = toNonNegativeCount(r.output ?? r.output_tokens);
+            const reasoning = toNonNegativeCount(r.reasoning ?? r.reasoning_tokens);
+            const cacheRead = toNonNegativeCount(r.cacheRead ?? r.cache_read ?? r.cache_read_tokens);
+            const cacheWrite = toNonNegativeCount(r.cacheWrite ?? r.cache_write ?? r.cache_write_tokens);
+
+            const totalKey = r.total ?? r.total_tokens ?? r.totalTokens;
+            const totalFromServer = totalKey === undefined || totalKey === null ? null : toNonNegativeCount(totalKey);
+            const total = typeof totalFromServer === "number" ? totalFromServer : input + output + reasoning + cacheRead + cacheWrite;
+
+            return { model, input, output, reasoning, cacheRead, cacheWrite, total };
+          })
+          .filter((r): r is TokenUsageRow => r !== null)
+      : [];
+
+    const totalsRaw = rec.totals;
+    const totalsObj = totalsRaw && typeof totalsRaw === "object" ? (totalsRaw as Record<string, unknown>) : null;
+
+    const inputTotal = toNonNegativeCount(totalsObj?.input ?? totalsObj?.input_tokens);
+    const outputTotal = toNonNegativeCount(totalsObj?.output ?? totalsObj?.output_tokens);
+    const reasoningTotal = toNonNegativeCount(totalsObj?.reasoning ?? totalsObj?.reasoning_tokens);
+    const cacheReadTotal = toNonNegativeCount(totalsObj?.cacheRead ?? totalsObj?.cache_read ?? totalsObj?.cache_read_tokens);
+    const cacheWriteTotal = toNonNegativeCount(totalsObj?.cacheWrite ?? totalsObj?.cache_write ?? totalsObj?.cache_write_tokens);
+
+    const totalKey = totalsObj?.total ?? totalsObj?.total_tokens ?? totalsObj?.totalTokens;
+    const totalFromServer = totalKey === undefined || totalKey === null ? null : toNonNegativeCount(totalKey);
+    const total = typeof totalFromServer === "number"
+      ? totalFromServer
+      : inputTotal + outputTotal + reasoningTotal + cacheReadTotal + cacheWriteTotal;
+
+    const totals: TokenUsageTotals = {
+      input: inputTotal,
+      output: outputTotal,
+      reasoning: reasoningTotal,
+      cacheRead: cacheReadTotal,
+      cacheWrite: cacheWriteTotal,
+      total,
+    };
+
+    return { totals, rows };
+  }
+
   function parsePlanSteps(stepsInput: unknown): Array<{ checked: boolean; text: string }> {
     if (!Array.isArray(stepsInput)) return [];
     
@@ -752,6 +842,7 @@ function toDashboardPayload(json: unknown): DashboardPayload {
   const steps = parsePlanSteps(plan.steps);
 
   const timeSeries = normalizeTimeSeries(anyJson.timeSeries, Date.now());
+  const tokenUsage = parseTokenUsage(anyJson.tokenUsage ?? anyJson.token_usage);
 
   return {
     mainSession: {
@@ -774,6 +865,7 @@ function toDashboardPayload(json: unknown): DashboardPayload {
     backgroundTasks,
     mainSessionTasks,
     timeSeries,
+    tokenUsage,
     raw: json,
   };
 }
@@ -976,6 +1068,48 @@ export default function App() {
   const rawJsonText = React.useMemo(() => {
     return JSON.stringify(data.raw, null, 2);
   }, [data.raw]);
+
+  const tokenUsageRowsSorted = React.useMemo(() => {
+    const rows = Array.isArray(data.tokenUsage?.rows) ? data.tokenUsage.rows : [];
+    const sorted = rows.slice();
+    sorted.sort((a, b) => {
+      const aTotal =
+        typeof a.total === "number" && Number.isFinite(a.total)
+          ? a.total
+          : a.input + a.output + a.reasoning + a.cacheRead + a.cacheWrite;
+      const bTotal =
+        typeof b.total === "number" && Number.isFinite(b.total)
+          ? b.total
+          : b.input + b.output + b.reasoning + b.cacheRead + b.cacheWrite;
+      return bTotal - aTotal;
+    });
+    return sorted;
+  }, [data.tokenUsage]);
+
+  const tokenUsageTotalsForUi = React.useMemo((): TokenUsageTotals => {
+    const base = data.tokenUsage?.totals;
+    if (!base) return { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+
+    const baseIsAllZero =
+      base.input === 0 &&
+      base.output === 0 &&
+      base.reasoning === 0 &&
+      base.cacheRead === 0 &&
+      base.cacheWrite === 0 &&
+      base.total === 0;
+    if (!baseIsAllZero) return base;
+
+    const sums = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
+    for (const r of data.tokenUsage?.rows ?? []) {
+      sums.input += toNonNegativeCount(r?.input);
+      sums.output += toNonNegativeCount(r?.output);
+      sums.reasoning += toNonNegativeCount(r?.reasoning);
+      sums.cacheRead += toNonNegativeCount(r?.cacheRead);
+      sums.cacheWrite += toNonNegativeCount(r?.cacheWrite);
+    }
+    const total = sums.input + sums.output + sums.reasoning + sums.cacheRead + sums.cacheWrite;
+    return { ...sums, total };
+  }, [data.tokenUsage]);
 
   React.useEffect(() => {
     let alive = true;
@@ -1325,6 +1459,59 @@ export default function App() {
               </div>
               <div className="mono path">{data.planProgress.path}</div>
             </article>
+          </section>
+
+          <section className="card">
+            <div className="cardHeader">
+              <h2>Token usage</h2>
+              <span className="badge">{data.tokenUsage.rows.length}</span>
+            </div>
+
+            <div className="tableWrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>MODEL</th>
+                    <th>INPUT</th>
+                    <th>OUTPUT</th>
+                    <th>REASONING</th>
+                    <th>CACHE.READ</th>
+                    <th>CACHE.WRITE</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="mono">TOTAL</td>
+                    <td className="mono">{tokenUsageTotalsForUi.input}</td>
+                    <td className="mono">{tokenUsageTotalsForUi.output}</td>
+                    <td className="mono">{tokenUsageTotalsForUi.reasoning}</td>
+                    <td className="mono">{tokenUsageTotalsForUi.cacheRead}</td>
+                    <td className="mono">{tokenUsageTotalsForUi.cacheWrite}</td>
+                  </tr>
+
+                  {tokenUsageRowsSorted.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="muted" style={{ padding: 16 }}>
+                        No token usage detected yet.
+                      </td>
+                    </tr>
+                  ) : null}
+
+                  {tokenUsageRowsSorted.map((r) => (
+                    <tr key={r.model}>
+                      <td className="mono" title={r.model}>
+                        {r.model}
+                      </td>
+                      <td className="mono">{r.input}</td>
+                      <td className="mono">{r.output}</td>
+                      <td className="mono">{r.reasoning}</td>
+                      <td className="mono">{r.cacheRead}</td>
+                      <td className="mono">{r.cacheWrite}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
 
           <section className="card">

@@ -5,6 +5,7 @@ import { deriveBackgroundTasks } from "../ingest/background-tasks"
 import { deriveTimeSeriesActivity, type TimeSeriesPayload } from "../ingest/timeseries"
 import { getMainSessionView, getStorageRoots, pickActiveSessionId, readMainSessionMetas, type MainSessionView, type OpenCodeStorageRoots, type SessionMetadata } from "../ingest/session"
 import { deriveToolCalls } from "../ingest/tool-calls"
+import { deriveTokenUsage } from "../ingest/token-usage"
 
 export type DashboardPayload = {
   mainSession: {
@@ -48,6 +49,7 @@ export type DashboardPayload = {
     sessionId: string | null
   }>
   timeSeries: TimeSeriesPayload
+  tokenUsage?: ReturnType<typeof deriveTokenUsage>
   raw: unknown
 }
 
@@ -212,6 +214,12 @@ export function buildDashboardPayload(opts: {
     ]
   })()
 
+  const tokenUsage = deriveTokenUsage({
+    storage: opts.storage,
+    mainSessionId: sessionId ?? null,
+    backgroundSessionIds: tasks.map((task) => task.sessionId ?? null),
+  })
+
   const payload: DashboardPayload = {
     mainSession: {
       agent: main.agent,
@@ -243,6 +251,7 @@ export function buildDashboardPayload(opts: {
     })),
     mainSessionTasks,
     timeSeries,
+    tokenUsage,
     raw: null,
   }
 

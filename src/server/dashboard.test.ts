@@ -355,4 +355,105 @@ describe("buildDashboardPayload", () => {
       fs.rmSync(projectRoot, { recursive: true, force: true })
     }
   })
+
+  it("includes tokenUsage totals and rows for main session", () => {
+    const storageRoot = mkStorageRoot()
+    const storage = getStorageRoots(storageRoot)
+    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "omo-project-"))
+    const sessionId = "ses_token_usage"
+    const messageId = "msg_token_1"
+    const projectID = "proj_1"
+    const providerID = "openai"
+    const modelID = "gpt-4o"
+    const expectedMessageTokens = {
+      input: 12,
+      output: 34,
+      reasoning: 5,
+      cache: {
+        read: 2,
+        write: 3,
+      },
+    }
+    const expectedTotals = {
+      input: 12,
+      output: 34,
+      reasoning: 5,
+      cacheRead: 2,
+      cacheWrite: 3,
+      total: 56,
+    }
+
+    try {
+      const sessionMetaDir = path.join(storage.session, projectID)
+      fs.mkdirSync(sessionMetaDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(sessionMetaDir, `${sessionId}.json`),
+        JSON.stringify({
+          id: sessionId,
+          projectID,
+          directory: projectRoot,
+          time: { created: 1000, updated: 1000 },
+        }),
+        "utf8"
+      )
+
+      const messageDir = path.join(storage.message, sessionId)
+      fs.mkdirSync(messageDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(messageDir, `${messageId}.json`),
+        JSON.stringify({
+          id: messageId,
+          sessionID: sessionId,
+          role: "assistant",
+          providerID,
+          modelID,
+          tokens: expectedMessageTokens,
+          time: { created: 1200 },
+        }),
+        "utf8"
+      )
+
+      type TokenUsageTotals = typeof expectedTotals
+      type TokenUsageRow = {
+        model: string
+        input: number
+        output: number
+        reasoning: number
+        cacheRead: number
+        cacheWrite: number
+        total: number
+      }
+      type DashboardPayloadWithTokenUsage = ReturnType<typeof buildDashboardPayload> & {
+        tokenUsage: {
+          totals: TokenUsageTotals
+          rows: TokenUsageRow[]
+        }
+      }
+
+      const payload = buildDashboardPayload({
+        projectRoot,
+        storage,
+        nowMs: 2000,
+      }) as DashboardPayloadWithTokenUsage
+
+      expect(payload).toHaveProperty("tokenUsage")
+      expect(payload.tokenUsage.totals).toEqual(expectedTotals)
+      expect(payload.tokenUsage.rows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            model: `${providerID}/${modelID}`,
+            input: expectedTotals.input,
+            output: expectedTotals.output,
+            reasoning: expectedTotals.reasoning,
+            cacheRead: expectedTotals.cacheRead,
+            cacheWrite: expectedTotals.cacheWrite,
+            total: expectedTotals.total,
+          }),
+        ])
+      )
+    } finally {
+      fs.rmSync(storageRoot, { recursive: true, force: true })
+      fs.rmSync(projectRoot, { recursive: true, force: true })
+    }
+  })
 })

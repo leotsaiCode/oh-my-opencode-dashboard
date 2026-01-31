@@ -4,7 +4,7 @@ import { toDashboardPayload } from "./App"
 describe('toDashboardPayload', () => {
   it('should preserve planProgress.steps from server JSON', () => {
     // #given: server JSON with planProgress.steps
-    const serverJson = {
+    const serverJson: unknown = {
       mainSession: {
         agent: "sisyphus",
         currentTool: "dashboard_start",
@@ -261,5 +261,110 @@ describe('toDashboardPayload', () => {
         timeline: "2026-01-01T00:00:00Z: 2m",
       },
     ])
+  })
+
+  it('should preserve tokenUsage from server JSON', () => {
+    type TokenUsage = {
+      totals: {
+        input: number
+        output: number
+        reasoning: number
+        cacheRead: number
+        cacheWrite: number
+        total: number
+      }
+      rows: Array<{
+        model: string
+        input: number
+        output: number
+        reasoning: number
+        cacheRead: number
+        cacheWrite: number
+        total: number
+      }>
+    }
+    type DashboardPayloadWithTokenUsage = ReturnType<typeof toDashboardPayload> & {
+      tokenUsage?: TokenUsage
+    }
+
+    // #given: server JSON with token usage totals and rows
+    const tokenUsageKey = "tokenUsage"
+    const serverJson: Record<string, unknown> = {
+      mainSession: {
+        agent: "sisyphus",
+        currentTool: "dashboard_start",
+        currentModel: "anthropic/claude-opus-4-5",
+        lastUpdatedLabel: "just now",
+        session: "test-session",
+        statusPill: "busy",
+      },
+    }
+
+    serverJson[tokenUsageKey] = {
+      totals: {
+        input: 120,
+        output: 340,
+        reasoning: 56,
+        cacheRead: 12,
+        cacheWrite: 8,
+        total: 536,
+      },
+      rows: [
+        {
+          model: "anthropic/claude-opus-4-5",
+          input: 100,
+          output: 300,
+          reasoning: 50,
+          cacheRead: 10,
+          cacheWrite: 5,
+          total: 465,
+        },
+        {
+          model: "openai/gpt-5.2",
+          input: 20,
+          output: 40,
+          reasoning: 6,
+          cacheRead: 2,
+          cacheWrite: 3,
+          total: 71,
+        },
+      ],
+    }
+
+    // #when: converting to dashboard payload
+    const payload = toDashboardPayload(serverJson)
+    const payloadWithTokenUsage = payload as DashboardPayloadWithTokenUsage
+
+    // #then: tokenUsage should be preserved with correct shape
+    expect(payloadWithTokenUsage.tokenUsage).toEqual({
+      totals: {
+        input: 120,
+        output: 340,
+        reasoning: 56,
+        cacheRead: 12,
+        cacheWrite: 8,
+        total: 536,
+      },
+      rows: [
+        {
+          model: "anthropic/claude-opus-4-5",
+          input: 100,
+          output: 300,
+          reasoning: 50,
+          cacheRead: 10,
+          cacheWrite: 5,
+          total: 465,
+        },
+        {
+          model: "openai/gpt-5.2",
+          input: 20,
+          output: 40,
+          reasoning: 6,
+          cacheRead: 2,
+          cacheWrite: 3,
+          total: 71,
+        },
+      ],
+    })
   })
 })
