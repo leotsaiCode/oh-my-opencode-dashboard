@@ -255,6 +255,71 @@ describe("deriveBackgroundTasks", () => {
     expect((rows[0] as unknown as Record<string, unknown>).state).toBeUndefined()
   })
 
+  it("correlates background session when child session title uses '@<subagent> subagent' format", () => {
+    const storageRoot = mkStorageRoot()
+    const storage = getStorageRoots(storageRoot)
+    const mainSessionId = "ses_main"
+
+    // Main session message + delegate_task tool part
+    const msgDir = path.join(storage.message, mainSessionId)
+    fs.mkdirSync(msgDir, { recursive: true })
+    const messageID = "msg_1"
+    fs.writeFileSync(
+      path.join(msgDir, `${messageID}.json`),
+      JSON.stringify({
+        id: messageID,
+        sessionID: mainSessionId,
+        role: "assistant",
+        time: { created: 1000 },
+      }),
+      "utf8"
+    )
+
+    const partDir = path.join(storage.part, messageID)
+    fs.mkdirSync(partDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(partDir, "part_1.json"),
+      JSON.stringify({
+        id: "part_1",
+        sessionID: mainSessionId,
+        messageID,
+        type: "tool",
+        callID: "call_1",
+        tool: "delegate_task",
+        state: {
+          status: "completed",
+          input: {
+            run_in_background: true,
+            description: "Docs on session APIs",
+            subagent_type: "librarian",
+          },
+        },
+      }),
+      "utf8"
+    )
+
+    // Child session metadata using the newer title pattern.
+    const projectID = "proj"
+    const sessDir = path.join(storage.session, projectID)
+    fs.mkdirSync(sessDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(sessDir, "ses_child.json"),
+      JSON.stringify({
+        id: "ses_child",
+        projectID,
+        directory: "/tmp/project",
+        title: "Docs on session APIs (@librarian subagent)",
+        parentID: mainSessionId,
+        time: { created: 1500, updated: 1500 },
+      }),
+      "utf8"
+    )
+
+    const rows = deriveBackgroundTasks({ storage, mainSessionId, nowMs: 2000 })
+    expect(rows.length).toBe(1)
+    expect(rows[0].sessionId).toBe("ses_child")
+  })
+
   it("selects deterministic background session when multiple candidates have identical created timestamps", () => {
     const storageRoot = mkStorageRoot()
     const storage = getStorageRoots(storageRoot)

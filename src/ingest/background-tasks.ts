@@ -118,53 +118,123 @@ function findBackgroundSessionId(opts: {
   allSessionMetas: SessionMetadata[]
   parentSessionId: string
   description: string
+  subagentType?: string | null
+  category?: string | null
   startedAt: number
 }): string | null {
-  const title = `Background: ${opts.description}`
-  const windowStart = opts.startedAt
-  const windowEnd = opts.startedAt + 60_000
+  const description = opts.description
+  const subagentType = typeof opts.subagentType === "string" && opts.subagentType.trim() ? opts.subagentType.trim() : null
+  const category = typeof opts.category === "string" && opts.category.trim() ? opts.category.trim() : null
+
+  // OpenCode/oh-my-opencode session title formats have changed over time.
+  // Prefer exact matches, but allow safe fallbacks within a bounded time window.
+  const expectedTitles = [
+    // Legacy
+    `Background: ${description}`,
+    // Current (observed): "<description> (@<subagent> subagent)"
+    ...(subagentType ? [`${description} (@${subagentType} subagent)`] : []),
+    // Best-effort fallback (older sync style can leak into bg)
+    `Task: ${description}`,
+  ]
+
+  const windowStart = opts.startedAt - 10_000
+  // Background tasks can remain queued before a child session is created.
+  const windowEnd = opts.startedAt + 15 * 60_000
 
   const candidates = opts.allSessionMetas.filter(
     (m) =>
       m.parentID === opts.parentSessionId &&
-      m.title === title &&
       m.time?.created >= windowStart &&
       m.time?.created <= windowEnd
   )
+
+  // Prefer exact title matches (most precise).
+  const exact = candidates.filter((m) => typeof m.title === "string" && expectedTitles.includes(m.title))
+  const pool = exact.length > 0
+    ? exact
+    : candidates.filter((m) => {
+        const t = typeof m.title === "string" ? m.title : ""
+        if (!t) return false
+        if (subagentType && t.startsWith(description) && t.includes(`@${subagentType}`)) return true
+        return t.startsWith(description)
+      })
+
+  const poolFallback = pool.length > 0 ? pool : candidates
+
   // Deterministic tie-breaking: max by time.created, then lexicographic id
-  candidates.sort((a, b) => {
+  poolFallback.sort((a, b) => {
     const at = a.time?.created ?? 0
     const bt = b.time?.created ?? 0
-    if (at !== bt) return bt - at
+
+    // Prefer the closest session to the tool start time (covers long queue delays).
+    const ad = Math.abs(at - opts.startedAt)
+    const bd = Math.abs(bt - opts.startedAt)
+    if (ad !== bd) return ad - bd
+
+    // Then prefer newer.
+    if (bt !== at) return bt - at
+
+    // Finally stable by id.
     return String(a.id).localeCompare(String(b.id))
   })
-  return candidates[0]?.id ?? null
+  return poolFallback[0]?.id ?? null
 }
 
 function findTaskSessionId(opts: {
   allSessionMetas: SessionMetadata[]
   parentSessionId: string
   description: string
+  subagentType?: string | null
+  category?: string | null
   startedAt: number
 }): string | null {
-  const title = `Task: ${opts.description}`
-  const windowStart = opts.startedAt
-  const windowEnd = opts.startedAt + 60_000
+  const description = opts.description
+  const subagentType = typeof opts.subagentType === "string" && opts.subagentType.trim() ? opts.subagentType.trim() : null
+  const category = typeof opts.category === "string" && opts.category.trim() ? opts.category.trim() : null
+
+  const expectedTitles = [
+    // Legacy
+    `Task: ${description}`,
+    // Current (observed): "<description> (@<subagent> subagent)"
+    ...(subagentType ? [`${description} (@${subagentType} subagent)`] : []),
+    // Best-effort fallback
+    `Background: ${description}`,
+  ]
+
+  const windowStart = opts.startedAt - 10_000
+  const windowEnd = opts.startedAt + 15 * 60_000
 
   const candidates = opts.allSessionMetas.filter(
     (m) =>
       m.parentID === opts.parentSessionId &&
-      m.title === title &&
       m.time?.created >= windowStart &&
       m.time?.created <= windowEnd
   )
-  candidates.sort((a, b) => {
+
+  const exact = candidates.filter((m) => typeof m.title === "string" && expectedTitles.includes(m.title))
+  const pool = exact.length > 0
+    ? exact
+    : candidates.filter((m) => {
+        const t = typeof m.title === "string" ? m.title : ""
+        if (!t) return false
+        if (subagentType && t.startsWith(description) && t.includes(`@${subagentType}`)) return true
+        return t.startsWith(description)
+      })
+
+  const poolFallback = pool.length > 0 ? pool : candidates
+
+  poolFallback.sort((a, b) => {
     const at = a.time?.created ?? 0
     const bt = b.time?.created ?? 0
-    if (at !== bt) return bt - at
+
+    const ad = Math.abs(at - opts.startedAt)
+    const bd = Math.abs(bt - opts.startedAt)
+    if (ad !== bd) return ad - bd
+
+    if (bt !== at) return bt - at
     return String(a.id).localeCompare(String(b.id))
   })
-  return candidates[0]?.id ?? null
+  return poolFallback[0]?.id ?? null
 }
 
 function deriveBackgroundSessionStats(
@@ -309,6 +379,8 @@ export function deriveBackgroundTasks(opts: {
           allSessionMetas,
           parentSessionId: opts.mainSessionId,
           description: rawDescription,
+          subagentType,
+          category,
           startedAt,
         })
       } else {
@@ -327,6 +399,8 @@ export function deriveBackgroundTasks(opts: {
             allSessionMetas,
             parentSessionId: opts.mainSessionId,
             description: rawDescription,
+            subagentType,
+            category,
             startedAt,
           })
           
@@ -335,6 +409,8 @@ export function deriveBackgroundTasks(opts: {
               allSessionMetas,
               parentSessionId: opts.mainSessionId,
               description: rawDescription,
+              subagentType,
+              category,
               startedAt,
             })
           }
