@@ -10,8 +10,12 @@ export function getDataDir(env: Env = process.env, homedir: string = os.homedir(
   return env.XDG_DATA_HOME ?? path.join(homedir, ".local", "share")
 }
 
+export function getOpenCodeStorageDirFromDataDir(dataDir: string): string {
+  return path.join(dataDir, "opencode", "storage")
+}
+
 export function getOpenCodeStorageDir(env: Env = process.env, homedir: string = os.homedir()): string {
-  return path.join(getDataDir(env, homedir), "opencode", "storage")
+  return getOpenCodeStorageDirFromDataDir(getDataDir(env, homedir))
 }
 
 export function realpathSafe(p: string): string | null {

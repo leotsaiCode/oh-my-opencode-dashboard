@@ -97,13 +97,19 @@ bun run build
 bun run start -- --project /absolute/path/to/your/project
 ```
 
-## What It Reads (File-Based)
+## What It Reads (SQLite + Legacy)
 
 - Project (optional; OhMyOpenCode plan tracking):
   - `.sisyphus/boulder.json`
   - Plan file at `boulder.active_plan`
-- OpenCode storage:
-  - `${XDG_DATA_HOME ?? ~/.local/share}/opencode/storage/{session,message,part}`
+- OpenCode storage (auto-detected, read-only):
+  - SQLite (preferred when usable): `${XDG_DATA_HOME ?? ~/.local/share}/opencode/opencode.db`
+  - SQLite WAL side files may exist: `opencode.db-wal`, `opencode.db-shm`
+  - Legacy file-based storage (fallback): `${XDG_DATA_HOME ?? ~/.local/share}/opencode/storage/{session,message,part}`
+
+SQLite is considered usable when `opencode.db` exists, opens read-only, and contains the required tables (`session`, `message`, `part`). If SQLite reads fail (for example busy, corrupt, unopenable, query errors) and legacy storage exists, the dashboard falls back to file-based mode.
+
+The dashboard uses best-effort file watching for `opencode.db` plus the WAL side files, but polling is still the correctness baseline.
 
 ## How It Chooses A Session
 
@@ -148,6 +154,8 @@ This dashboard is designed to avoid sensitive data:
 - If sessions are not detected, run OpenCode at least once in that exact project directory.
 - If sessions are not detected, ensure `--project` matches the real (resolved) path of the directory stored in the session metadata (symlinks matter).
 - If sessions are not detected, verify OpenCode storage exists under `${XDG_DATA_HOME ?? ~/.local/share}/opencode/storage` (check `XDG_DATA_HOME`).
+- If the dashboard seems stale in SQLite mode, note that OpenCode may be writing via WAL (`opencode.db-wal`, `opencode.db-shm`). Polling is the baseline; file watching is best-effort.
+- If SQLite mode fails and you have legacy storage present, the dashboard will fall back automatically. If you only have SQLite, try closing OpenCode (to release locks) and reload the dashboard.
 
 ## Publishing (Maintainers)
 

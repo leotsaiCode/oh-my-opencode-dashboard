@@ -2,7 +2,7 @@
 import { Hono } from "hono"
 import { createApi } from "./api"
 import { createDashboardStore, type DashboardStore } from "./dashboard"
-import { getOpenCodeStorageDir } from "../ingest/paths"
+import { getLegacyStorageRootForBackend, selectStorageBackend } from "../ingest/storage-backend"
 
 const args = process.argv.slice(2)
 let projectPath: string | undefined;
@@ -26,11 +26,13 @@ const resolvedProjectPath = projectPath ?? process.cwd()
 
 const app = new Hono()
 
-const storageRoot = getOpenCodeStorageDir()
+const storageBackend = selectStorageBackend()
+const storageRoot = getLegacyStorageRootForBackend(storageBackend)
 
 const store = createDashboardStore({
   projectRoot: resolvedProjectPath,
   storageRoot,
+  storageBackend,
   watch: true,
   pollIntervalMs: 2000,
 })
@@ -51,6 +53,7 @@ const getStoreForSource = ({ sourceId, projectRoot }: { sourceId: string; projec
   const created = createDashboardStore({
     projectRoot,
     storageRoot,
+    storageBackend,
     watch: true,
     pollIntervalMs: 2000,
   })
@@ -59,7 +62,7 @@ const getStoreForSource = ({ sourceId, projectRoot }: { sourceId: string; projec
   return created
 }
 
-app.route("/api", createApi({ store, storageRoot, projectRoot: resolvedProjectPath, getStoreForSource }))
+app.route("/api", createApi({ store, storageRoot, projectRoot: resolvedProjectPath, storageBackend, getStoreForSource }))
 
 Bun.serve({
   fetch: app.fetch,

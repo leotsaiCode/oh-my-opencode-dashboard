@@ -456,4 +456,82 @@ describe("buildDashboardPayload", () => {
       fs.rmSync(projectRoot, { recursive: true, force: true })
     }
   })
+
+  it("falls back to files when sqlite backend is unusable", () => {
+    const storageRoot = mkStorageRoot()
+    const storage = getStorageRoots(storageRoot)
+    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "omo-project-"))
+    const sqliteDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "omo-data-"))
+    const sqlitePath = path.join(sqliteDataDir, "opencode", "opencode.db")
+    const sessionId = "ses_files_fallback"
+    const messageId = "msg_1"
+    const projectID = "proj_1"
+
+    try {
+      fs.mkdirSync(path.dirname(sqlitePath), { recursive: true })
+      fs.writeFileSync(sqlitePath, "not a sqlite database", "utf8")
+
+      const sessionMetaDir = path.join(storage.session, projectID)
+      fs.mkdirSync(sessionMetaDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(sessionMetaDir, `${sessionId}.json`),
+        JSON.stringify({
+          id: sessionId,
+          projectID,
+          directory: projectRoot,
+          time: { created: 1000, updated: 1000 },
+        }),
+        "utf8"
+      )
+
+      const messageDir = path.join(storage.message, sessionId)
+      fs.mkdirSync(messageDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(messageDir, `${messageId}.json`),
+        JSON.stringify({
+          id: messageId,
+          sessionID: sessionId,
+          role: "assistant",
+          agent: "sisyphus",
+          time: { created: 1000 },
+        }),
+        "utf8"
+      )
+
+      const partDir = path.join(storage.part, messageId)
+      fs.mkdirSync(partDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(partDir, "part_1.json"),
+        JSON.stringify({
+          id: "part_1",
+          sessionID: sessionId,
+          messageID: messageId,
+          type: "tool",
+          callID: "call_1",
+          tool: "delegate_task",
+          state: { status: "running", input: {} },
+        }),
+        "utf8"
+      )
+
+      const payload = buildDashboardPayload({
+        projectRoot,
+        storage,
+        nowMs: 2000,
+        storageBackend: {
+          kind: "sqlite",
+          dataDir: sqliteDataDir,
+          sqlitePath,
+        },
+      })
+
+      expect(payload.mainSession.sessionId).toBe(sessionId)
+      expect(payload.mainSession.statusPill).toBe("running tool")
+      expect(payload.mainSession.currentTool).toBe("delegate_task")
+    } finally {
+      fs.rmSync(storageRoot, { recursive: true, force: true })
+      fs.rmSync(projectRoot, { recursive: true, force: true })
+      fs.rmSync(sqliteDataDir, { recursive: true, force: true })
+    }
+  })
 })
