@@ -5,7 +5,7 @@ import { basename, join } from 'node:path'
 import { parseArgs } from 'util'
 import { createApi } from "./api"
 import { createDashboardStore, type DashboardStore } from "./dashboard"
-import { getOpenCodeStorageDir } from "../ingest/paths"
+import { getLegacyStorageRootForBackend, selectStorageBackend } from "../ingest/storage-backend"
 import { addOrUpdateSource } from "../ingest/sources-registry"
 
 const { values, positionals } = parseArgs({
@@ -47,7 +47,8 @@ if (command === "add") {
     process.exit(1)
   }
 
-  const storageRoot = getOpenCodeStorageDir()
+  const storageBackend = selectStorageBackend()
+  const storageRoot = getLegacyStorageRootForBackend(storageBackend)
   const id = addOrUpdateSource(storageRoot, { projectRoot, label })
   console.log(`Added source ${id}: ${label}`)
   process.exit(0)
@@ -55,11 +56,13 @@ if (command === "add") {
 
 const app = new Hono()
 
-const storageRoot = getOpenCodeStorageDir()
+const storageBackend = selectStorageBackend()
+const storageRoot = getLegacyStorageRootForBackend(storageBackend)
 
 const store = createDashboardStore({
   projectRoot: project,
   storageRoot,
+  storageBackend,
   watch: true,
   pollIntervalMs: 2000,
 })
@@ -80,6 +83,7 @@ const getStoreForSource = ({ sourceId, projectRoot }: { sourceId: string; projec
   const created = createDashboardStore({
     projectRoot,
     storageRoot,
+    storageBackend,
     watch: true,
     pollIntervalMs: 2000,
   })
@@ -88,7 +92,7 @@ const getStoreForSource = ({ sourceId, projectRoot }: { sourceId: string; projec
   return created
 }
 
-app.route('/api', createApi({ store, storageRoot, projectRoot: project, getStoreForSource }))
+app.route('/api', createApi({ store, storageRoot, projectRoot: project, storageBackend, getStoreForSource }))
 
 const distRoot = join(import.meta.dir, '../../dist')
 

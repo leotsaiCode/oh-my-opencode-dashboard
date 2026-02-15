@@ -6,6 +6,16 @@ import { deriveTimeSeriesActivity, type TimeSeriesPayload } from "../ingest/time
 import { getMainSessionView, getStorageRoots, pickActiveSessionId, readMainSessionMetas, type MainSessionView, type OpenCodeStorageRoots, type SessionMetadata } from "../ingest/session"
 import { deriveToolCalls } from "../ingest/tool-calls"
 import { deriveTokenUsage } from "../ingest/token-usage"
+import type { StorageBackend } from "../ingest/storage-backend"
+import {
+  deriveBackgroundTasksSqlite,
+  deriveTimeSeriesActivitySqlite,
+  deriveTokenUsageSqlite,
+  deriveToolCallsSqlite,
+  getMainSessionViewSqlite,
+  pickActiveSessionIdSqlite,
+} from "../ingest/sqlite-derive"
+import { readMainSessionMetasSqlite } from "../ingest/storage-backend"
 
 export type DashboardPayload = {
   mainSession: {
@@ -135,7 +145,7 @@ function formatTimeline(startAt: number | null, endAtMs: number): string {
   return `${start}: ${elapsed}`
 }
 
-export function buildDashboardPayload(opts: {
+function buildDashboardPayloadFiles(opts: {
   projectRoot: string
   storage: OpenCodeStorageRoots
   nowMs?: number
@@ -265,6 +275,194 @@ export function buildDashboardPayload(opts: {
   return payload
 }
 
+function hasLegacyStorageRoots(storage: OpenCodeStorageRoots): boolean {
+  return fs.existsSync(storage.session) && fs.existsSync(storage.message) && fs.existsSync(storage.part)
+}
+
+export function buildDashboardPayload(opts: {
+  projectRoot: string
+  storage: OpenCodeStorageRoots
+  nowMs?: number
+  storageBackend?: StorageBackend
+}): DashboardPayload {
+  const nowMs = opts.nowMs ?? Date.now()
+  const backend = opts.storageBackend
+  if (!backend || backend.kind !== "sqlite") {
+    return buildDashboardPayloadFiles({
+      projectRoot: opts.projectRoot,
+      storage: opts.storage,
+      nowMs,
+    })
+  }
+
+  const boulder = readBoulderState(opts.projectRoot)
+  const planName = boulder?.plan_name ?? "(no active plan)"
+  const planPath = boulder?.active_plan ?? ""
+  const plan = boulder ? readPlanProgress(opts.projectRoot, boulder.active_plan) : { total: 0, completed: 0, isComplete: false, missing: true }
+  const planSteps = boulder ? readPlanSteps(opts.projectRoot, boulder.active_plan) : { missing: true, steps: [] as PlanStep[] }
+
+  const active = pickActiveSessionIdSqlite({
+    sqlitePath: backend.sqlitePath,
+    projectRoot: opts.projectRoot,
+    boulderSessionIds: boulder?.session_ids,
+  })
+  if (!active.ok) {
+    if (hasLegacyStorageRoots(opts.storage)) {
+      return buildDashboardPayloadFiles({ projectRoot: opts.projectRoot, storage: opts.storage, nowMs })
+    }
+    return buildDashboardPayloadFiles({ projectRoot: opts.projectRoot, storage: opts.storage, nowMs })
+  }
+
+  const sessionId = active.value
+  let sessionMeta: SessionMetadata | null = null
+  if (sessionId) {
+    const metas = readMainSessionMetasSqlite({ sqlitePath: backend.sqlitePath, directoryFilter: opts.projectRoot })
+    if (!metas.ok) {
+      if (hasLegacyStorageRoots(opts.storage)) {
+        return buildDashboardPayloadFiles({ projectRoot: opts.projectRoot, storage: opts.storage, nowMs })
+      }
+      return buildDashboardPayloadFiles({ projectRoot: opts.projectRoot, storage: opts.storage, nowMs })
+    }
+    sessionMeta = metas.rows.find((m) => m.id === sessionId) ?? null
+  }
+
+  const main = sessionId
+    ? (() => {
+        const result = getMainSessionViewSqlite({
+          sqlitePath: backend.sqlitePath,
+          sessionId,
+          sessionMeta,
+          nowMs,
+        })
+        if (!result.ok) return null
+        return result.value
+      })()
+    : { agent: "unknown", currentTool: null, currentModel: null, lastUpdated: null, sessionLabel: "(no session)", status: "unknown" as const }
+  if (!main) {
+    if (hasLegacyStorageRoots(opts.storage)) {
+      return buildDashboardPayloadFiles({ projectRoot: opts.projectRoot, storage: opts.storage, nowMs })
+    }
+    return buildDashboardPayloadFiles({ projectRoot: opts.projectRoot, storage: opts.storage, nowMs })
+  }
+
+  const tasksResult = sessionId
+    ? deriveBackgroundTasksSqlite({
+        sqlitePath: backend.sqlitePath,
+        mainSessionId: sessionId,
+        nowMs,
+      })
+    : { ok: true as const, value: [] }
+  if (!tasksResult.ok) {
+    if (hasLegacyStorageRoots(opts.storage)) {
+      return buildDashboardPayloadFiles({ projectRoot: opts.projectRoot, storage: opts.storage, nowMs })
+    }
+    return buildDashboardPayloadFiles({ projectRoot: opts.projectRoot, storage: opts.storage, nowMs })
+  }
+
+  const timeSeriesResult = deriveTimeSeriesActivitySqlite({
+    sqlitePath: backend.sqlitePath,
+    mainSessionId: sessionId ?? null,
+    nowMs,
+  })
+  if (!timeSeriesResult.ok) {
+    if (hasLegacyStorageRoots(opts.storage)) {
+      return buildDashboardPayloadFiles({ projectRoot: opts.projectRoot, storage: opts.storage, nowMs })
+    }
+    return buildDashboardPayloadFiles({ projectRoot: opts.projectRoot, storage: opts.storage, nowMs })
+  }
+
+  const mainCurrentModel = main.currentModel
+  const mainSessionTasks = (() => {
+    if (!sessionId) return []
+
+    const mainStatus = main.status
+    const status = mainStatus === "running_tool" || mainStatus === "thinking" || mainStatus === "busy"
+      ? "running"
+      : mainStatus === "idle"
+        ? "idle"
+        : "unknown"
+
+    const callsResult = deriveToolCallsSqlite({ sqlitePath: backend.sqlitePath, sessionId })
+    if (!callsResult.ok) {
+      return []
+    }
+
+    const startAt = sessionMeta?.time?.created ?? null
+    const endAtMs = status === "running" ? nowMs : (main.lastUpdated ?? nowMs)
+
+    return [
+      {
+        id: "main-session",
+        description: "Main session",
+        subline: sessionId,
+        agent: main.agent,
+        lastModel: mainCurrentModel,
+        status,
+        toolCalls: callsResult.value.toolCalls.length,
+        lastTool: callsResult.value.toolCalls[0]?.tool ?? "-",
+        timeline: formatTimeline(startAt, endAtMs),
+        sessionId,
+      },
+    ]
+  })()
+
+  const tokenUsageResult = deriveTokenUsageSqlite({
+    sqlitePath: backend.sqlitePath,
+    mainSessionId: sessionId ?? null,
+    backgroundSessionIds: tasksResult.value.map((task) => task.sessionId ?? null),
+  })
+  if (!tokenUsageResult.ok) {
+    if (hasLegacyStorageRoots(opts.storage)) {
+      return buildDashboardPayloadFiles({ projectRoot: opts.projectRoot, storage: opts.storage, nowMs })
+    }
+    return buildDashboardPayloadFiles({ projectRoot: opts.projectRoot, storage: opts.storage, nowMs })
+  }
+
+  const payload: DashboardPayload = {
+    mainSession: {
+      agent: main.agent,
+      currentModel: mainCurrentModel,
+      currentTool: main.currentTool ?? "-",
+      lastUpdatedLabel: formatIso(main.lastUpdated),
+      session: main.sessionLabel,
+      sessionId: sessionId ?? null,
+      statusPill: mainStatusPill(main.status),
+    },
+    planProgress: {
+      name: planName,
+      completed: plan.completed,
+      total: plan.total,
+      path: planPath,
+      statusPill: planStatusPill(plan),
+      steps: planSteps.missing ? [] : planSteps.steps,
+    },
+    backgroundTasks: tasksResult.value.map((t) => ({
+      id: t.id,
+      description: t.description,
+      agent: t.agent,
+      lastModel: t.lastModel ?? null,
+      status: t.status,
+      toolCalls: t.toolCalls ?? 0,
+      lastTool: t.lastTool ?? "-",
+      timeline: typeof t.timeline === "string" ? t.timeline : "",
+      sessionId: t.sessionId ?? null,
+    })),
+    mainSessionTasks,
+    timeSeries: timeSeriesResult.value,
+    tokenUsage: tokenUsageResult.value,
+    raw: null,
+  }
+
+  payload.raw = {
+    mainSession: payload.mainSession,
+    planProgress: payload.planProgress,
+    backgroundTasks: payload.backgroundTasks,
+    mainSessionTasks: payload.mainSessionTasks,
+    timeSeries: payload.timeSeries,
+  }
+  return payload
+}
+
 function watchIfExists(target: string, onChange: () => void): fs.FSWatcher | null {
   try {
     if (!fs.existsSync(target)) return null
@@ -277,6 +475,7 @@ function watchIfExists(target: string, onChange: () => void): fs.FSWatcher | nul
 export function createDashboardStore(opts: {
   projectRoot: string
   storageRoot: string
+  storageBackend?: StorageBackend
   pollIntervalMs?: number
   watch?: boolean
 }): DashboardStore {
@@ -294,13 +493,23 @@ export function createDashboardStore(opts: {
   }
 
   if (watch) {
-    watchers.push(...[
+    const baseWatchers = [
       watchIfExists(path.join(opts.projectRoot, ".sisyphus", "boulder.json"), markDirty),
       watchIfExists(path.join(opts.projectRoot, ".sisyphus", "plans"), markDirty),
-      watchIfExists(storage.session, markDirty),
-      watchIfExists(storage.message, markDirty),
-      watchIfExists(storage.part, markDirty),
-    ].filter(Boolean) as fs.FSWatcher[])
+    ]
+    const backendWatchers = opts.storageBackend?.kind === "sqlite"
+      ? [
+          watchIfExists(opts.storageBackend.sqlitePath, markDirty),
+          watchIfExists(`${opts.storageBackend.sqlitePath}-wal`, markDirty),
+          watchIfExists(`${opts.storageBackend.sqlitePath}-shm`, markDirty),
+        ]
+      : [
+          watchIfExists(storage.session, markDirty),
+          watchIfExists(storage.message, markDirty),
+          watchIfExists(storage.part, markDirty),
+        ]
+
+    watchers.push(...[...baseWatchers, ...backendWatchers].filter(Boolean) as fs.FSWatcher[])
 
     // Best-effort: close watchers on process exit.
     process.on("exit", () => {
@@ -318,7 +527,12 @@ export function createDashboardStore(opts: {
     getSnapshot() {
       const now = Date.now()
       if (!cached || dirty || now - lastComputedAt > pollIntervalMs) {
-        cached = buildDashboardPayload({ projectRoot: opts.projectRoot, storage })
+        cached = buildDashboardPayload({
+          projectRoot: opts.projectRoot,
+          storage,
+          nowMs: now,
+          storageBackend: opts.storageBackend,
+        })
         lastComputedAt = now
         dirty = false
       }
