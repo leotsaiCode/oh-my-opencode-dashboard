@@ -255,6 +255,86 @@ describe("deriveBackgroundTasks", () => {
     expect((rows[0] as unknown as Record<string, unknown>).state).toBeUndefined()
   })
 
+  it("includes task rows when description is missing but sessionId metadata is present", () => {
+    const storageRoot = mkStorageRoot()
+    const storage = getStorageRoots(storageRoot)
+    const mainSessionId = "ses_main"
+
+    const msgDir = path.join(storage.message, mainSessionId)
+    fs.mkdirSync(msgDir, { recursive: true })
+    const messageID = "msg_1"
+    fs.writeFileSync(
+      path.join(msgDir, `${messageID}.json`),
+      JSON.stringify({
+        id: messageID,
+        sessionID: mainSessionId,
+        role: "assistant",
+        time: { created: 1000 },
+      }),
+      "utf8"
+    )
+
+    const partDir = path.join(storage.part, messageID)
+    fs.mkdirSync(partDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(partDir, "part_1.json"),
+      JSON.stringify({
+        id: "part_1",
+        sessionID: mainSessionId,
+        messageID,
+        type: "tool",
+        callID: "call_1",
+        tool: "task",
+        state: {
+          status: "completed",
+          input: {
+            run_in_background: true,
+            subagent_type: "explore",
+          },
+          metadata: {
+            sessionId: "ses_child",
+          },
+        },
+      }),
+      "utf8"
+    )
+
+    const projectID = "proj"
+    const sessDir = path.join(storage.session, projectID)
+    fs.mkdirSync(sessDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(sessDir, "ses_child.json"),
+      JSON.stringify({
+        id: "ses_child",
+        projectID,
+        directory: "/tmp/project",
+        title: "Docs on session APIs (@explore subagent)",
+        parentID: mainSessionId,
+        time: { created: 1200, updated: 1200 },
+      }),
+      "utf8"
+    )
+
+    const childMsgDir = path.join(storage.message, "ses_child")
+    fs.mkdirSync(childMsgDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(childMsgDir, "msg_child.json"),
+      JSON.stringify({
+        id: "msg_child",
+        sessionID: "ses_child",
+        role: "assistant",
+        time: { created: 1300 },
+      }),
+      "utf8"
+    )
+
+    const rows = deriveBackgroundTasks({ storage, mainSessionId })
+    expect(rows.length).toBe(1)
+    expect(rows[0].sessionId).toBe("ses_child")
+    expect(rows[0].description).toBe("Docs on session APIs (@explore subagent)")
+    expect(rows[0].agent).toBe("explore")
+  })
+
   it("correlates background session when child session title uses '@<subagent> subagent' format", () => {
     const storageRoot = mkStorageRoot()
     const storage = getStorageRoots(storageRoot)

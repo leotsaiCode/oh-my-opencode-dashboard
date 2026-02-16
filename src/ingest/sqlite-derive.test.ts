@@ -76,12 +76,20 @@ function insertToolPart(db: BunDatabase, opts: {
   tool: string
   status: "pending" | "running" | "completed" | "error"
   input?: Record<string, unknown>
+  stateTitle?: string
+  stateMeta?: Record<string, unknown>
   created?: number
   startTime?: number
 }): void {
   const state: Record<string, unknown> = {
     status: opts.status,
     input: opts.input ?? {},
+  }
+  if (typeof opts.stateTitle === "string") {
+    state.title = opts.stateTitle
+  }
+  if (opts.stateMeta && typeof opts.stateMeta === "object") {
+    state.metadata = opts.stateMeta
   }
   if (typeof opts.startTime === "number") {
     state.time = { start: opts.startTime }
@@ -329,6 +337,53 @@ describe("sqlite derive helpers", () => {
       })
     },
   )
+
+  it("deriveBackgroundTasksSqlite includes rows when description is missing but state.metadata.sessionId is present", () => {
+    const sqlitePath = mkSqliteDb()
+    const db = new BunDatabase(sqlitePath)
+    insertSession(db, { id: "ses_main", directory: "/repo", created: 500, updated: 500 })
+    insertMessage(db, { id: "msg_main", sessionId: "ses_main", created: 1000 })
+    insertToolPart(db, {
+      id: "part_task",
+      messageId: "msg_main",
+      sessionId: "ses_main",
+      callID: "call_task",
+      tool: "task",
+      status: "completed",
+      input: {
+        run_in_background: true,
+        subagent_type: "explore",
+      },
+      stateMeta: {
+        sessionId: "ses_child",
+      },
+      created: 1000,
+      startTime: 1000,
+    })
+    insertSession(db, {
+      id: "ses_child",
+      directory: "/repo",
+      parentID: "ses_main",
+      title: "Docs on session APIs (@explore subagent)",
+      created: 1100,
+      updated: 1100,
+    })
+    db.close()
+
+    const result = deriveBackgroundTasksSqlite({
+      sqlitePath,
+      mainSessionId: "ses_main",
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value).toHaveLength(1)
+    expect(result.value[0]).toMatchObject({
+      id: "call_task",
+      sessionId: "ses_child",
+      description: "Docs on session APIs (@explore subagent)",
+      agent: "explore",
+    })
+  })
 
   it("pickActiveSessionIdSqlite prefers newest main session metadata over a stale boulder session_id", () => {
     const sqlitePath = mkSqliteDb()

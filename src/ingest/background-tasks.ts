@@ -20,6 +20,49 @@ export type BackgroundTaskRow = {
 
 const DESCRIPTION_MAX = 120
 const AGENT_MAX = 30
+const SESSION_ID_MAX = 200
+
+function readSessionId(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const s = value.trim()
+  if (!s) return null
+  if (s.length > SESSION_ID_MAX) return null
+  if (s === "pending") return null
+  return s
+}
+
+function readToolStateTitle(part: unknown): string | null {
+  if (!part || typeof part !== "object") return null
+  const rec = part as Record<string, unknown>
+  const state = rec.state
+  if (!state || typeof state !== "object") return null
+  return clampString((state as Record<string, unknown>).title, DESCRIPTION_MAX)
+}
+
+function readToolStateSessionId(part: unknown): string | null {
+  if (!part || typeof part !== "object") return null
+  const rec = part as Record<string, unknown>
+  const state = rec.state
+  if (!state || typeof state !== "object") return null
+  const meta = (state as Record<string, unknown>).metadata
+  if (!meta || typeof meta !== "object") return null
+  const m = meta as Record<string, unknown>
+  return (
+    readSessionId(m.sessionId) ??
+    readSessionId(m.sessionID) ??
+    readSessionId(m.session_id)
+  )
+}
+
+function stripSessionTitlePrefix(title: string): string {
+  const trimmed = title.trim()
+  const stripped = trimmed.startsWith("Background: ")
+    ? trimmed.slice("Background: ".length).trimStart()
+    : trimmed.startsWith("Task: ")
+      ? trimmed.slice("Task: ".length).trimStart()
+      : trimmed
+  return /^(undefined|null)(\b|\s)/i.test(stripped) ? "" : stripped
+}
 
 function readStartTimeFromToolPart(part: unknown): number | null {
   if (!part || typeof part !== "object") return null
@@ -124,7 +167,6 @@ function findBackgroundSessionId(opts: {
 }): string | null {
   const description = opts.description
   const subagentType = typeof opts.subagentType === "string" && opts.subagentType.trim() ? opts.subagentType.trim() : null
-  const category = typeof opts.category === "string" && opts.category.trim() ? opts.category.trim() : null
 
   // OpenCode/oh-my-opencode session title formats have changed over time.
   // Prefer exact matches, but allow safe fallbacks within a bounded time window.
@@ -190,7 +232,6 @@ function findTaskSessionId(opts: {
 }): string | null {
   const description = opts.description
   const subagentType = typeof opts.subagentType === "string" && opts.subagentType.trim() ? opts.subagentType.trim() : null
-  const category = typeof opts.category === "string" && opts.category.trim() ? opts.category.trim() : null
 
   const expectedTitles = [
     // Legacy
@@ -294,7 +335,7 @@ function formatTimeline(startAt: number | null, endAtMs: number): string {
   return `${start}: ${elapsed}`
 }
 
-const TASK_TOOL_NAMES = new Set(["delegate_task", "task"])
+const TASK_TOOL_NAMES = new Set(["delegate_task", "task", "call_omo_agent", "background_task"])
 
 function isTaskTool(toolName: string): boolean {
   return TASK_TOOL_NAMES.has(toolName)
@@ -311,6 +352,7 @@ export function deriveBackgroundTasks(opts: {
   const messageDir = getMessageDir(opts.storage.message, opts.mainSessionId)
   const metas = readRecentMessageMetas(messageDir, 200, fsLike)
   const allSessionMetas = readAllSessionMetas(opts.storage.session, fsLike)
+  const sessionMetaById = new Map(allSessionMetas.map((m) => [m.id, m] as const))
   const backgroundMessageCache = new Map<string, StoredMessageMeta[]>()
   const backgroundStatsCache = new Map<string, { toolCalls: number; lastTool: string | null; lastUpdateAt: number | null }>()
   const backgroundModelCache = new Map<string, string | null>()
@@ -357,7 +399,9 @@ export function deriveBackgroundTasks(opts: {
       const input = part.state.input ?? {}
       if (typeof input !== "object" || input === null) continue
 
-      const runInBackground = (input as Record<string, unknown>).run_in_background
+      const runInBackground = part.tool === "background_task"
+        ? true
+        : (input as Record<string, unknown>).run_in_background
       if (runInBackground !== true && runInBackground !== false) continue
 
       const rawDescription = (() => {
@@ -366,12 +410,11 @@ export function deriveBackgroundTasks(opts: {
         const s = v.trim()
         return s.length > 0 ? s : null
       })()
-      if (!rawDescription) continue
 
-      const description = clampString(rawDescription, DESCRIPTION_MAX)
-      if (!description) continue
-
-      const subagentType = clampString((input as Record<string, unknown>).subagent_type, AGENT_MAX)
+      const subagentType = clampString(
+        (input as Record<string, unknown>).subagent_type ?? (input as Record<string, unknown>).agent,
+        AGENT_MAX
+      )
       const category = clampString((input as Record<string, unknown>).category, AGENT_MAX)
       const agent = subagentType ?? (category ? `sisyphus-junior (${category})` : "unknown")
 
@@ -379,16 +422,20 @@ export function deriveBackgroundTasks(opts: {
 
       // Use tool-call start time when available; message meta created can be much earlier.
       const startedAt = readStartTimeFromToolPart(part) ?? messageCreatedAt
+
+      backgroundSessionId = readToolStateSessionId(part)
       
       if (runInBackground) {
-        backgroundSessionId = findBackgroundSessionId({
-          allSessionMetas,
-          parentSessionId: opts.mainSessionId,
-          description: rawDescription,
-          subagentType,
-          category,
-          startedAt,
-        })
+        if (!backgroundSessionId && rawDescription) {
+          backgroundSessionId = findBackgroundSessionId({
+            allSessionMetas,
+            parentSessionId: opts.mainSessionId,
+            description: rawDescription,
+            subagentType,
+            category,
+            startedAt,
+          })
+        }
       } else {
         // For sync tasks, check if resume is specified
         const resume = (input as Record<string, unknown>).resume
@@ -400,7 +447,7 @@ export function deriveBackgroundTasks(opts: {
           }
         }
         
-        if (!backgroundSessionId) {
+        if (!backgroundSessionId && rawDescription) {
           backgroundSessionId = findBackgroundSessionId({
             allSessionMetas,
             parentSessionId: opts.mainSessionId,
@@ -422,6 +469,17 @@ export function deriveBackgroundTasks(opts: {
           }
         }
       }
+
+      const description = (
+        clampString(rawDescription, DESCRIPTION_MAX) ??
+        readToolStateTitle(part) ??
+        (() => {
+          const t = sessionMetaById.get(backgroundSessionId ?? "")?.title
+          if (typeof t !== "string") return null
+          return clampString(stripSessionTitlePrefix(t), DESCRIPTION_MAX)
+        })() ??
+        (subagentType ? `${subagentType} task` : category ? `${category} task` : "Task")
+      )
 
       const stats = backgroundSessionId
         ? readBackgroundStats(backgroundSessionId)

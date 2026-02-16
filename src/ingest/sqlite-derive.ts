@@ -17,9 +17,10 @@ type SqliteDeriveResult<T> =
   | { ok: true; value: T }
   | { ok: false; reason: SqliteReadFailureReason }
 
-const TASK_TOOL_NAMES = new Set(["delegate_task", "task"])
+const TASK_TOOL_NAMES = new Set(["delegate_task", "task", "call_omo_agent", "background_task"])
 const DESCRIPTION_MAX = 120
 const AGENT_MAX = 30
+const SESSION_ID_MAX = 200
 const TOKEN_USAGE_MESSAGE_LIMIT = 10_000
 
 type CanonicalAgent = "sisyphus" | "prometheus" | "atlas" | "other"
@@ -48,6 +49,48 @@ function clampString(value: unknown, maxLen: number): string | null {
   const s = value.trim()
   if (!s) return null
   return s.length <= maxLen ? s : s.slice(0, maxLen)
+}
+
+function readSessionId(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const s = value.trim()
+  if (!s) return null
+  if (s.length > SESSION_ID_MAX) return null
+  if (s === "pending") return null
+  return s
+}
+
+function readToolStateTitle(part: unknown): string | null {
+  if (!part || typeof part !== "object") return null
+  const rec = part as Record<string, unknown>
+  const state = rec.state
+  if (!state || typeof state !== "object") return null
+  return clampString((state as Record<string, unknown>).title, DESCRIPTION_MAX)
+}
+
+function readToolStateSessionId(part: unknown): string | null {
+  if (!part || typeof part !== "object") return null
+  const rec = part as Record<string, unknown>
+  const state = rec.state
+  if (!state || typeof state !== "object") return null
+  const meta = (state as Record<string, unknown>).metadata
+  if (!meta || typeof meta !== "object") return null
+  const m = meta as Record<string, unknown>
+  return (
+    readSessionId(m.sessionId) ??
+    readSessionId(m.sessionID) ??
+    readSessionId(m.session_id)
+  )
+}
+
+function stripSessionTitlePrefix(title: string): string {
+  const trimmed = title.trim()
+  const stripped = trimmed.startsWith("Background: ")
+    ? trimmed.slice("Background: ".length).trimStart()
+    : trimmed.startsWith("Task: ")
+      ? trimmed.slice("Task: ".length).trimStart()
+      : trimmed
+  return /^(undefined|null)(\b|\s)/i.test(stripped) ? "" : stripped
 }
 
 function formatIsoNoMs(ts: number): string {
@@ -375,6 +418,7 @@ export function deriveBackgroundTasksSqlite(opts: {
   const allSessionMetasResult = readAllSessionMetasSqlite({ sqlitePath: opts.sqlitePath })
   if (!allSessionMetasResult.ok) return allSessionMetasResult
   const allSessionMetas = allSessionMetasResult.rows
+  const sessionMetaById = new Map(allSessionMetas.map((m) => [m.id, m] as const))
 
   const backgroundMessageCache = new Map<string, StoredMessageMeta[]>()
   const backgroundPartsCache = new Map<string, Map<string, StoredToolPart[]>>()
@@ -411,30 +455,31 @@ export function deriveBackgroundTasksSqlite(opts: {
       if (typeof input !== "object" || input === null) continue
 
       const rec = input as Record<string, unknown>
-      const runInBackground = rec.run_in_background
+      const runInBackground = part.tool === "background_task" ? true : rec.run_in_background
       if (runInBackground !== true && runInBackground !== false) continue
 
       const rawDescription = typeof rec.description === "string" ? rec.description.trim() : ""
-      if (!rawDescription) continue
-      const description = clampString(rawDescription, DESCRIPTION_MAX)
-      if (!description) continue
 
-      const subagentType = clampString(rec.subagent_type, AGENT_MAX)
+      const subagentType = clampString(rec.subagent_type ?? rec.agent, AGENT_MAX)
       const category = clampString(rec.category, AGENT_MAX)
       const agent = subagentType ?? (category ? `sisyphus-junior (${category})` : "unknown")
 
       let backgroundSessionId: string | null = null
       const startedAt = readStartTimeFromToolPart(part) ?? messageCreatedAt
 
+      backgroundSessionId = readToolStateSessionId(part)
+
       if (runInBackground) {
-        backgroundSessionId = findBackgroundSessionId({
-          allSessionMetas,
-          parentSessionId: opts.mainSessionId,
-          description: rawDescription,
-          subagentType,
-          category,
-          startedAt,
-        })
+        if (!backgroundSessionId && rawDescription) {
+          backgroundSessionId = findBackgroundSessionId({
+            allSessionMetas,
+            parentSessionId: opts.mainSessionId,
+            description: rawDescription,
+            subagentType,
+            category,
+            startedAt,
+          })
+        }
       } else {
         const resume = typeof rec.resume === "string" ? rec.resume.trim() : ""
         if (resume) {
@@ -442,7 +487,7 @@ export function deriveBackgroundTasksSqlite(opts: {
           if (!resumed.ok) return resumed
           if (resumed.value.metas.length > 0) backgroundSessionId = resume
         }
-        if (!backgroundSessionId) {
+        if (!backgroundSessionId && rawDescription) {
           backgroundSessionId = findBackgroundSessionId({
             allSessionMetas,
             parentSessionId: opts.mainSessionId,
@@ -463,6 +508,17 @@ export function deriveBackgroundTasksSqlite(opts: {
           }
         }
       }
+
+      const description = (
+        clampString(rawDescription, DESCRIPTION_MAX) ??
+        readToolStateTitle(part) ??
+        (() => {
+          const t = sessionMetaById.get(backgroundSessionId ?? "")?.title
+          if (typeof t !== "string") return null
+          return clampString(stripSessionTitlePrefix(t), DESCRIPTION_MAX)
+        })() ??
+        (subagentType ? `${subagentType} task` : category ? `${category} task` : "Task")
+      )
 
       const background = backgroundSessionId ? readBackgroundSession(backgroundSessionId) : null
       if (background && !background.ok) return background
