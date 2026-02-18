@@ -362,6 +362,13 @@ export function TimeSeriesActivitySection(props: { timeSeries: TimeSeries }) {
   );
 }
 
+type TodoItem = {
+  content: string;
+  status: string;
+  priority: string;
+  position: number;
+};
+
 type DashboardPayload = {
   mainSession: {
     agent: string;
@@ -384,6 +391,7 @@ type DashboardPayload = {
   mainSessionTasks: BackgroundTask[];
   timeSeries: TimeSeries;
   tokenUsage: TokenUsage;
+  todos: TodoItem[];
   raw: unknown;
 };
 
@@ -538,6 +546,7 @@ const FALLBACK_DATA: DashboardPayload = {
     totals: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     rows: [],
   },
+  todos: [],
   raw: {
     ok: false,
     hint: "API not reachable yet. Using placeholder data.",
@@ -961,6 +970,22 @@ function toDashboardPayload(json: unknown): DashboardPayload {
   const timeSeries = normalizeTimeSeries(anyJson.timeSeries, Date.now());
   const tokenUsage = parseTokenUsage(anyJson.tokenUsage ?? anyJson.token_usage);
 
+  const todosRaw = anyJson.todos;
+  const todos: TodoItem[] = Array.isArray(todosRaw)
+    ? todosRaw
+        .map((t): TodoItem | null => {
+          if (!t || typeof t !== "object") return null;
+          const rec = t as Record<string, unknown>;
+          const content = typeof rec.content === "string" ? rec.content : null;
+          const status = typeof rec.status === "string" ? rec.status : null;
+          const priority = typeof rec.priority === "string" ? rec.priority : null;
+          const position = typeof rec.position === "number" ? rec.position : null;
+          if (!content || !status || !priority || position === null) return null;
+          return { content, status, priority, position };
+        })
+        .filter((t): t is TodoItem => t !== null)
+    : [];
+
   return {
     mainSession: {
       agent: String(main.agent ?? FALLBACK_DATA.mainSession.agent),
@@ -983,6 +1008,7 @@ function toDashboardPayload(json: unknown): DashboardPayload {
     mainSessionTasks,
     timeSeries,
     tokenUsage,
+    todos,
     raw: json,
   };
 }
@@ -1591,6 +1617,40 @@ export default function App() {
                 <div className="kvKey">SESSION</div>
                 <div className="kvVal mono">{data.mainSession.session}</div>
               </div>
+            </article>
+
+            <article className="card">
+              <div className="cardHeader">
+                <h2>Todos</h2>
+              </div>
+              {data.todos.length > 0 ? (
+                <table className="bgTasksTable">
+                  <thead>
+                    <tr>
+                      <th>CONTENT</th>
+                      <th>STATUS</th>
+                      <th>PRIORITY</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.todos.map((todo, idx) => (
+                      <tr key={`${todo.position}-${idx}`}>
+                        <td className="mono">{todo.content}</td>
+                        <td>
+                          <span className={`pill pill-${statusTone(todo.status)}`}>
+                            {todo.status}
+                          </span>
+                        </td>
+                        <td className="mono">{todo.priority}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="muted" style={{ padding: "16px 0" }}>
+                  No todos detected yet.
+                </div>
+              )}
             </article>
 
             <article className="card">

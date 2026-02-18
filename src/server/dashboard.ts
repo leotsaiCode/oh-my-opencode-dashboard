@@ -10,6 +10,7 @@ import type { StorageBackend } from "../ingest/storage-backend"
 import {
   deriveBackgroundTasksSqlite,
   deriveTimeSeriesActivitySqlite,
+  deriveTodosSqlite,
   deriveTokenUsageSqlite,
   deriveToolCallsSqlite,
   getMainSessionViewSqlite,
@@ -60,6 +61,12 @@ export type DashboardPayload = {
   }>
   timeSeries: TimeSeriesPayload
   tokenUsage?: ReturnType<typeof deriveTokenUsage>
+  todos: Array<{
+    content: string
+    status: string
+    priority: string
+    position: number
+  }>
   raw: unknown
 }
 
@@ -262,6 +269,7 @@ function buildDashboardPayloadFiles(opts: {
     mainSessionTasks,
     timeSeries,
     tokenUsage,
+    todos: [],
     raw: null,
   }
 
@@ -418,6 +426,15 @@ export function buildDashboardPayload(opts: {
     return buildDashboardPayloadFiles({ projectRoot: opts.projectRoot, storage: opts.storage, nowMs })
   }
 
+  const todosResult = sessionId
+    ? deriveTodosSqlite({
+        sqlitePath: backend.sqlitePath,
+        sessionId,
+      })
+    : { ok: true as const, value: [] }
+  // Don't fail the entire payload if todos fail, just use empty array
+  const todos = todosResult.ok ? todosResult.value : []
+
   const payload: DashboardPayload = {
     mainSession: {
       agent: main.agent,
@@ -450,6 +467,7 @@ export function buildDashboardPayload(opts: {
     mainSessionTasks,
     timeSeries: timeSeriesResult.value,
     tokenUsage: tokenUsageResult.value,
+    todos,
     raw: null,
   }
 

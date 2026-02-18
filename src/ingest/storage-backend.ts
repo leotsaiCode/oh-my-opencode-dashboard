@@ -327,6 +327,57 @@ export function readToolPartsForMessagesSqlite(opts: {
   return { ok: true, rows }
 }
 
+export type TodoItem = {
+  content: string
+  status: string
+  priority: string
+  position: number
+}
+
+export function readTodosSqlite(opts: {
+  sqlitePath: string
+  sessionId: string
+}): SqliteReadResult<TodoItem> {
+  const result = withReadonlyDb(opts.sqlitePath, (db) => {
+    try {
+      return db
+        .query("SELECT content, status, priority, position FROM todo WHERE session_id = ? ORDER BY position ASC")
+        .all(opts.sessionId) as Array<{
+        content: unknown
+        status: unknown
+        priority: unknown
+        position: unknown
+      }>
+    } catch (error) {
+      // If the todo table doesn't exist, return empty array
+      const message = error instanceof Error ? error.message.toLowerCase() : ""
+      if (message.includes("no such table")) {
+        return []
+      }
+      throw error
+    }
+  })
+  if (!result.ok) return result
+
+  const rows: TodoItem[] = []
+  for (const row of result.value) {
+    const content = asString(row.content)
+    const status = asString(row.status)
+    const priority = asString(row.priority)
+    const position = asFiniteNumber(row.position)
+    if (!content || !status || !priority || position === null) continue
+
+    rows.push({
+      content,
+      status,
+      priority,
+      position,
+    })
+  }
+
+  return { ok: true, rows }
+}
+
 export function isSqliteUsable(sqlitePath: string): boolean {
   if (!fs.existsSync(sqlitePath)) return false
 

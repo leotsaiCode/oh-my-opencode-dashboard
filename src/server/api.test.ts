@@ -111,6 +111,7 @@ const createStore = (): DashboardStore => ({
       serverNowMs: 0,
       series: [{ id: "overall-main", label: "Overall", tone: "muted" as const, values: [] as number[] }],
     },
+    todos: [],
     raw: null,
   }),
 } satisfies DashboardStore)

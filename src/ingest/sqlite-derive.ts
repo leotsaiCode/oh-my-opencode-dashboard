@@ -6,8 +6,10 @@ import {
   readMainSessionMetasSqlite,
   readRecentMessageMetasSqlite,
   readSessionExistsSqlite,
+  readTodosSqlite,
   readToolPartsForMessagesSqlite,
   type SqliteReadFailureReason,
+  type TodoItem,
 } from "./storage-backend"
 import { aggregateTokenUsage } from "./token-usage-core"
 import { MAX_TOOL_CALL_MESSAGES, MAX_TOOL_CALLS, type ToolCallSummaryResult } from "./tool-calls"
@@ -800,5 +802,21 @@ export function deriveToolCallsSqlite(opts: {
       truncated: truncatedByMessages || truncatedByCalls,
       sessionExists: true,
     },
+  }
+}
+
+export function deriveTodosSqlite(opts: {
+  sqlitePath: string
+  sessionId: string
+}): SqliteDeriveResult<TodoItem[]> {
+  const result = readTodosSqlite({
+    sqlitePath: opts.sqlitePath,
+    sessionId: opts.sessionId,
+  })
+  if (!result.ok) return result
+
+  return {
+    ok: true,
+    value: result.rows,
   }
 }
