@@ -1633,8 +1633,8 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.todos.map((todo, idx) => (
-                      <tr key={`${todo.position}-${idx}`}>
+                    {data.todos.map((todo) => (
+                      <tr key={todo.position}>
                         <td className="mono">{todo.content}</td>
                         <td>
                           <span className={`pill pill-${statusTone(todo.status)}`}>
