@@ -338,8 +338,16 @@ export function isSqliteUsable(sqlitePath: string): boolean {
       .all() as Array<{ name?: string }>
 
     const names = new Set(rows.map((row) => row.name).filter((name): name is string => typeof name === "string"))
-    return REQUIRED_TABLES.every((table) => names.has(table))
-  } catch {
+    const ok = REQUIRED_TABLES.every((table) => names.has(table))
+    return ok
+  } catch (error) {
+    const reason = classifySqliteError(error)
+    // If it's busy or unopenable due to Windows locking, but the file exists,
+    // we should still consider it a SQLite backend, because falling back to legacy
+    // files will permanently break the dashboard.
+    if (reason === "db_busy" || reason === "db_unopenable") {
+      return true
+    }
     return false
   } finally {
     try {

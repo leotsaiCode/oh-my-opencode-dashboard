@@ -7,7 +7,11 @@ export type Env = Record<string, string | undefined>
 export function getDataDir(env: Env = process.env, homedir: string = os.homedir()): string {
   // Match oh-my-opencode behavior exactly:
   // XDG_DATA_HOME or ~/.local/share on all platforms.
-  return env.XDG_DATA_HOME ?? path.join(homedir, ".local", "share")
+  let dataDir = env.XDG_DATA_HOME
+  if (dataDir && dataDir.startsWith("~")) {
+    dataDir = path.join(homedir, dataDir.slice(1))
+  }
+  return dataDir ?? path.join(homedir, ".local", "share")
 }
 
 export function getOpenCodeStorageDirFromDataDir(dataDir: string): string {
