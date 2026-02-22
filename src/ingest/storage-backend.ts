@@ -342,9 +342,15 @@ export function isSqliteUsable(sqlitePath: string): boolean {
     return ok
   } catch (error) {
     const reason = classifySqliteError(error)
-    // If it's busy or unopenable due to Windows locking, but the file exists,
-    // we should still consider it a SQLite backend, because falling back to legacy
-    // files will permanently break the dashboard.
+    // If the DB file exists but is temporarily busy or unopenable (e.g. Windows
+    // file locking), we still treat SQLite as the active backend instead of
+    // falling back to legacy files. Once oh-my-opencode has migrated to SQLite,
+    // the legacy file storage is no longer authoritative and may be stale or only
+    // partially migrated. Falling back in this situation would make the dashboard
+    // read from outdated data indefinitely, effectively "breaking" it until the
+    // user manually cleans up the storage. By returning true here we keep SQLite
+    // as the single source of truth and surface a temporary "Disconnected" state
+    // rather than silently reverting to inconsistent legacy data.
     if (reason === "db_busy" || reason === "db_unopenable") {
       return true
     }

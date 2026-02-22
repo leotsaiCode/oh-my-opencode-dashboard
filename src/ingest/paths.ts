@@ -8,8 +8,12 @@ export function getDataDir(env: Env = process.env, homedir: string = os.homedir(
   // Match oh-my-opencode behavior exactly:
   // XDG_DATA_HOME or ~/.local/share on all platforms.
   let dataDir = env.XDG_DATA_HOME
-  if (dataDir && dataDir.startsWith("~")) {
-    dataDir = path.join(homedir, dataDir.slice(1))
+  if (dataDir) {
+    if (dataDir === "~") {
+      dataDir = homedir
+    } else if (dataDir.startsWith("~/") || dataDir.startsWith("~\\")) {
+      dataDir = path.join(homedir, dataDir.slice(2))
+    }
   }
   return dataDir ?? path.join(homedir, ".local", "share")
 }

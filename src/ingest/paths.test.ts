@@ -7,12 +7,32 @@ import { assertAllowedPath, getOpenCodeStorageDir } from "./paths"
 describe("getOpenCodeStorageDir", () => {
   it("uses XDG_DATA_HOME when set", () => {
     const got = getOpenCodeStorageDir({ XDG_DATA_HOME: "/tmp/xdg" }, "/home/test")
-    expect(got).toBe("/tmp/xdg/opencode/storage")
+    expect(got).toBe(path.join("/tmp/xdg", "opencode", "storage"))
   })
 
   it("falls back to ~/.local/share when XDG_DATA_HOME is unset", () => {
     const got = getOpenCodeStorageDir({}, "/home/test")
-    expect(got).toBe("/home/test/.local/share/opencode/storage")
+    expect(got).toBe(path.join("/home/test", ".local", "share", "opencode", "storage"))
+  })
+
+  it("expands exactly ~ in XDG_DATA_HOME", () => {
+    const got = getOpenCodeStorageDir({ XDG_DATA_HOME: "~" }, "/home/test")
+    expect(got).toBe(path.join("/home/test", "opencode", "storage"))
+  })
+
+  it("expands ~/ in XDG_DATA_HOME", () => {
+    const got = getOpenCodeStorageDir({ XDG_DATA_HOME: "~/.custom/share" }, "/home/test")
+    expect(got).toBe(path.join("/home/test", ".custom", "share", "opencode", "storage"))
+  })
+
+  it("expands ~\\ in XDG_DATA_HOME", () => {
+    const got = getOpenCodeStorageDir({ XDG_DATA_HOME: "~\\.custom\\share" }, "/home/test")
+    expect(got).toBe(path.join("/home/test", ".custom", "share", "opencode", "storage"))
+  })
+
+  it("does not expand ~username in XDG_DATA_HOME", () => {
+    const got = getOpenCodeStorageDir({ XDG_DATA_HOME: "~otheruser/data" }, "/home/test")
+    expect(got).toBe(path.join("~otheruser/data", "opencode", "storage"))
   })
 })
 
@@ -27,7 +47,7 @@ describe("assertAllowedPath", () => {
       allowedRoots: [allowed],
     })
 
-    expect(resolved).toContain("/allowed/")
+    expect(resolved).toContain(path.join(path.sep, "allowed", path.sep))
   })
 
   it("rejects traversal outside allowed root", () => {
@@ -76,7 +96,7 @@ describe("assertAllowedPath", () => {
       allowedRoots: [allowed],
     })
 
-    expect(resolved).toContain("/allowed/")
+    expect(resolved).toContain(path.join(path.sep, "allowed", path.sep))
     expect(resolved.endsWith(path.join("missing", "file.txt"))).toBe(true)
   })
 })

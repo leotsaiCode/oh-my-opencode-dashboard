@@ -1100,10 +1100,7 @@ export default function App() {
 
         setSourcesState("ok");
         
-        // Always try to tick even if no source is selected to get default project state
-        if (!nextId && parsed.sources.length === 0) {
-          setSelectedSourceId("");
-        }
+
       } catch {
         if (!alive) return;
         setSources([]);
@@ -1290,9 +1287,7 @@ export default function App() {
 
   React.useEffect(() => {
     if (sourcesState === "idle" || sourcesState === "loading") return;
-    // We allow selectedSourceId to be an empty string "" to indicate "fetch default /api/dashboard"
-    // So we only return if it is strictly null.
-    if (sourcesState === "ok" && selectedSourceId === null) return;
+    if (sourcesState === "ok" && selectedSourceId === null && sources.length > 0) return;
 
     let alive = true;
 
