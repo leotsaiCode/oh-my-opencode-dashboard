@@ -12,7 +12,8 @@ export function getDataDir(env: Env = process.env, homedir: string = os.homedir(
     if (dataDir === "~") {
       dataDir = homedir
     } else if (dataDir.startsWith("~/") || dataDir.startsWith("~\\")) {
-      dataDir = path.join(homedir, dataDir.slice(2))
+      const suffix = dataDir.slice(2).replace(/[\\/]+/g, path.sep)
+      dataDir = path.join(homedir, suffix)
     }
   }
   return dataDir ?? path.join(homedir, ".local", "share")
