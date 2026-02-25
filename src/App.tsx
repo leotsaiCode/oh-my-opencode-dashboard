@@ -1133,6 +1133,8 @@ export default function App() {
         }
 
         setSourcesState("ok");
+        
+
       } catch {
         if (!alive) return;
         setSources([]);
@@ -1325,7 +1327,7 @@ export default function App() {
 
   React.useEffect(() => {
     if (sourcesState === "idle" || sourcesState === "loading") return;
-    if (sourcesState === "ok" && !selectedSourceId) return;
+    if (sourcesState === "ok" && selectedSourceId === null && sources.length > 0) return;
 
     let alive = true;
 
