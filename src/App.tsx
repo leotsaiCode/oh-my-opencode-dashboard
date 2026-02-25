@@ -369,6 +369,8 @@ type TodoItem = {
   position: number;
 };
 
+type PlanTodosView = "plan" | "todos";
+
 type DashboardPayload = {
   mainSession: {
     agent: string;
@@ -579,6 +581,11 @@ function statusTone(status: string): "teal" | "sand" | "red" {
   if (s.includes("error") || s.includes("fail")) return "red";
   if (s.includes("run") || s.includes("progress") || s.includes("busy") || s.includes("think")) return "teal";
   return "sand";
+}
+
+function isTodoDoneStatus(status: string): boolean {
+  const normalized = String(status ?? "").trim().toLowerCase();
+  return normalized === "completed" || normalized === "complete" || normalized === "done";
 }
 
 function maxCount(values: number[]): number {
@@ -1022,6 +1029,7 @@ export default function App() {
   const [soundEnabled, setSoundEnabled] = React.useState(false);
   const [soundUnlocked, setSoundUnlocked] = React.useState(false);
   const [planOpen, setPlanOpen] = React.useState(false);
+  const [planTodosView, setPlanTodosView] = React.useState<PlanTodosView>("plan");
   const [theme, setTheme] = React.useState<"light" | "dark">(() => {
     if (typeof document === "undefined") return "light";
     return (document.documentElement.getAttribute("data-theme") as "light" | "dark") || "light";
@@ -1262,6 +1270,12 @@ export default function App() {
     if (!data.planProgress.total) return 0;
     return clampPercent((data.planProgress.completed / data.planProgress.total) * 100);
   }, [data.planProgress.completed, data.planProgress.total]);
+
+  const todoSummary = React.useMemo(() => {
+    const total = data.todos.length;
+    const completed = data.todos.reduce((acc, todo) => acc + (isTodoDoneStatus(todo.status) ? 1 : 0), 0);
+    return { completed, total };
+  }, [data.todos]);
 
   const rawJsonText = React.useMemo(() => {
     return JSON.stringify(data.raw, null, 2);
@@ -1621,86 +1635,115 @@ export default function App() {
 
             <article className="card">
               <div className="cardHeader">
-                <h2>Todos</h2>
+                <h2>Plan progress and todos</h2>
+                <span className="muted mono">
+                  {planTodosView === "plan"
+                    ? `todos ${todoSummary.completed}/${todoSummary.total || 0}`
+                    : `plan ${data.planProgress.completed}/${data.planProgress.total || 0}`}
+                </span>
               </div>
-              {data.todos.length > 0 ? (
-                <table className="bgTasksTable">
-                  <thead>
-                    <tr>
-                      <th>CONTENT</th>
-                      <th>STATUS</th>
-                      <th>PRIORITY</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.todos.map((todo) => (
-                      <tr key={todo.position}>
-                        <td className="mono">{todo.content}</td>
-                        <td>
-                          <span className={`pill pill-${statusTone(todo.status)}`}>
-                            {todo.status}
-                          </span>
-                        </td>
-                        <td className="mono">{todo.priority}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <div className="muted" style={{ padding: "16px 0" }}>
-                  No todos detected yet.
-                </div>
-              )}
-            </article>
-
-            <article className="card">
-              <div className="cardHeader">
-                <h2>Plan progress</h2>
-                <span className={`pill pill-${statusTone(data.planProgress.statusPill)}`}>{data.planProgress.statusPill}</span>
-              </div>
-              <div className="cardHeader" style={{ marginTop: 8 }}>
+              <div className="viewToggle" role="tablist" aria-label="Plan and todos view">
                 <button
-                  className="button"
+                  className={`viewToggleButton ${planTodosView === "plan" ? "isActive" : ""}`}
                   type="button"
-                  onClick={() => setPlanOpen((v) => !v)}
-                  aria-expanded={planOpen}
+                  role="tab"
+                  aria-selected={planTodosView === "plan"}
+                  onClick={() => setPlanTodosView("plan")}
                 >
-                  {planOpen ? "Hide steps" : "Show steps"}
+                  Plan {data.planProgress.completed}/{data.planProgress.total || 0}
+                </button>
+                <button
+                  className={`viewToggleButton ${planTodosView === "todos" ? "isActive" : ""}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={planTodosView === "todos"}
+                  onClick={() => setPlanTodosView("todos")}
+                >
+                  Todos {todoSummary.completed}/{todoSummary.total || 0}
                 </button>
               </div>
-              <div className="kv">
-                <div className="kvRow">
-                  <div className="kvKey">NAME</div>
-                  <div className="kvVal mono">{data.planProgress.name}</div>
-                </div>
-                <div className="kvRow">
-                  <div className="kvKey">PROGRESS</div>
-                  <div className="kvVal">
-                    <span className="mono">
-                      {data.planProgress.completed}/{data.planProgress.total || "?"}
-                    </span>
-                    <span className="muted"> - {Math.round(planPercent)}%</span>
+              {planTodosView === "plan" ? (
+                <>
+                  <div className="cardHeader" style={{ marginTop: 8 }}>
+                    <span className={`pill pill-${statusTone(data.planProgress.statusPill)}`}>{data.planProgress.statusPill}</span>
+                    <button
+                      className="button"
+                      type="button"
+                      onClick={() => setPlanOpen((v) => !v)}
+                      aria-expanded={planOpen}
+                    >
+                      {planOpen ? "Hide steps" : "Show steps"}
+                    </button>
                   </div>
-                </div>
-              </div>
-              {planOpen ? (
-                <div className="divider" />
+                  <div className="kv">
+                    <div className="kvRow">
+                      <div className="kvKey">NAME</div>
+                      <div className="kvVal mono">{data.planProgress.name}</div>
+                    </div>
+                    <div className="kvRow">
+                      <div className="kvKey">PROGRESS</div>
+                      <div className="kvVal">
+                        <span className="mono">
+                          {data.planProgress.completed}/{data.planProgress.total || "?"}
+                        </span>
+                        <span className="muted"> - {Math.round(planPercent)}%</span>
+                      </div>
+                    </div>
+                  </div>
+                  {planOpen ? (
+                    <div className="divider" />
+                  ) : null}
+                  {planOpen ? (
+                    <div className="mono" style={{ fontSize: 12, lineHeight: 1.5 }}>
+                      {(data.planProgress.steps ?? []).length > 0
+                        ? (data.planProgress.steps ?? []).map((s, idx) => (
+                            <div key={`${idx}-${s.checked ? "x" : "_"}-${s.text}`}>[{s.checked ? "x" : " "}] {s.text || "(empty)"}</div>
+                          ))
+                        : "(no steps detected)"}
+                    </div>
+                  ) : null}
+                  <div className="progressWrap">
+                    <div className="progressTrack">
+                      <div className="progressFill" style={{ width: `${planPercent}%` }} />
+                    </div>
+                  </div>
+                  <div className="mono path">{data.planProgress.path}</div>
+                </>
               ) : null}
-              {planOpen ? (
-                <div className="mono" style={{ fontSize: 12, lineHeight: 1.5 }}>
-                  {(data.planProgress.steps ?? []).length > 0
-                    ? (data.planProgress.steps ?? []).map((s, idx) => (
-                        <div key={`${idx}-${s.checked ? "x" : "_"}-${s.text}`}>[{s.checked ? "x" : " "}] {s.text || "(empty)"}</div>
-                      ))
-                    : "(no steps detected)"}
-                </div>
+              {planTodosView === "todos" ? (
+                <>
+                  {data.todos.length > 0 ? (
+                    <div className="tableWrap">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>CONTENT</th>
+                            <th>STATUS</th>
+                            <th>PRIORITY</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {data.todos.map((todo) => (
+                            <tr key={todo.position}>
+                              <td className="mono">{todo.content}</td>
+                              <td>
+                                <span className={`pill pill-${statusTone(todo.status)}`}>
+                                  {todo.status}
+                                </span>
+                              </td>
+                              <td className="mono">{todo.priority}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="muted" style={{ padding: "16px 0" }}>
+                      No todos detected yet.
+                    </div>
+                  )}
+                </>
               ) : null}
-              <div className="progressWrap">
-                <div className="progressTrack">
-                  <div className="progressFill" style={{ width: `${planPercent}%` }} />
-                </div>
-              </div>
-              <div className="mono path">{data.planProgress.path}</div>
             </article>
           </section>
 

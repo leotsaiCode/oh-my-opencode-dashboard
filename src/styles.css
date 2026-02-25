@@ -150,6 +150,26 @@
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.25);
 }
 
+[data-theme="dark"] .viewToggle {
+  border: 1px solid rgba(232, 230, 227, 0.14);
+  background: rgba(40, 44, 48, 0.62);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.18);
+}
+
+[data-theme="dark"] .viewToggleButton {
+  color: rgba(232, 230, 227, 0.64);
+}
+
+[data-theme="dark"] .viewToggleButton:hover {
+  color: var(--ink);
+}
+
+[data-theme="dark"] .viewToggleButton.isActive {
+  color: var(--teal);
+  border-color: rgba(26, 181, 163, 0.3);
+  background: rgba(26, 181, 163, 0.15);
+}
+
 /* Key-Value rows */
 [data-theme="dark"] .kvKey {
   color: rgba(232, 230, 227, 0.58);
@@ -586,6 +606,46 @@ input.field {
   font-size: 16px;
   font-weight: 680;
   font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+}
+
+.viewToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 36, 38, 0.12);
+  background: rgba(255, 255, 255, 0.56);
+  box-shadow: 0 6px 14px rgba(29, 32, 33, 0.05);
+}
+
+.viewToggleButton {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 7px 10px;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.viewToggleButton:hover {
+  transform: translateY(-1px);
+  color: var(--ink);
+}
+
+.viewToggleButton.isActive {
+  color: var(--teal-ink);
+  border-color: rgba(15, 90, 81, 0.2);
+  background: var(--teal-soft);
+}
+
+.viewToggleButton:focus-visible {
+  outline: 2px solid rgba(15, 90, 81, 0.3);
+  outline-offset: 2px;
 }
 
 .kv {
